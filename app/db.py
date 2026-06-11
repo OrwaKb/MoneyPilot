@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -218,6 +219,9 @@ _GOAL_FIELDS = {"name", "emoji", "type", "target_agorot", "target_date", "status
 
 
 def add_goal(conn, *, name, type, target_agorot, emoji="🎯", target_date=None) -> int:
+    if conn.execute("SELECT 1 FROM goals WHERE status='active'"
+                    " AND LOWER(name)=LOWER(?)", (name.strip(),)).fetchone():
+        raise ValueError(f"goal '{name}' already exists")
     cur = conn.execute(
         "INSERT INTO goals(name, emoji, type, target_agorot, target_date,"
         " status, created_at) VALUES(?,?,?,?,?,'active',?)",
@@ -231,6 +235,8 @@ def update_goal(conn, goal_id: int, **kw) -> None:
     bad = set(kw) - _GOAL_FIELDS
     if bad:
         raise ValueError(f"unknown goal fields: {bad}")
+    if not kw:
+        return
     kw = {k: _iso(v) for k, v in kw.items()}
     sets = ",".join(f"{k}=?" for k in kw)
     conn.execute(f"UPDATE goals SET {sets} WHERE id=?", (*kw.values(), goal_id))
@@ -251,7 +257,8 @@ def get_goal_by_name(conn, name: str):
     if row:
         return row
     return conn.execute(
-        "SELECT * FROM goals WHERE status='active' AND LOWER(name) LIKE ?",
+        "SELECT * FROM goals WHERE status='active' AND LOWER(name) LIKE ?"
+        " ORDER BY LENGTH(name), id",
         (f"%{name.strip().lower()}%",)).fetchone()
 
 
@@ -305,6 +312,8 @@ def export_json(conn) -> dict:
 
 
 def import_json(conn, data: dict) -> None:
+    if data.get("schema_version") != SCHEMA_VERSION or not data.get("categories"):
+        raise ValueError("not a MoneyPilot backup (or schema version mismatch)")
     with conn:  # single transaction
         for t in reversed(_EXPORT_TABLES):
             conn.execute(f"DELETE FROM {t}")
@@ -327,9 +336,14 @@ def write_daily_backup(conn, backup_dir, today: dt.date):
     target = bdir / f"ledger-{today.isoformat()}.json"
     if target.exists():
         return None
-    target.write_text(json.dumps(export_json(conn), ensure_ascii=False, indent=1),
-                      encoding="utf-8")
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(export_json(conn), ensure_ascii=False, indent=1),
+                   encoding="utf-8")
+    os.replace(tmp, target)
     backups = sorted(bdir.glob("ledger-*.json"))
     for old in backups[:-30]:
-        old.unlink()
+        try:
+            old.unlink()
+        except OSError:
+            pass  # OneDrive may hold a lock; retry naturally next day
     return target

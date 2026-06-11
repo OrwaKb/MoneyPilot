@@ -1,6 +1,8 @@
 import datetime as dt
 import json
 
+import pytest
+
 from app import db
 
 D = dt.date(2026, 6, 11)
@@ -60,3 +62,30 @@ def test_daily_backup_written_once_and_pruned(conn, tmp_path):
         (bdir / f"ledger-2026-04-{i:02d}.json").write_text("{}", encoding="utf-8")
     db.write_daily_backup(conn, bdir, D + dt.timedelta(days=1))
     assert len(list(bdir.glob("ledger-*.json"))) == 30
+
+
+def test_import_rejects_non_backup(conn):
+    db.set_setting(conn, "salary_day", "10")
+    with pytest.raises(ValueError):
+        db.import_json(conn, {})
+    assert db.get_setting(conn, "salary_day") == "10"  # data intact
+
+
+def test_import_rolls_back_on_malformed_row(conn):
+    db.add_goal(conn, name="Keep", type="purchase_fund", target_agorot=100)
+    data = db.export_json(conn)
+    data["transactions"] = [{"bogus_col": 1}]
+    with pytest.raises(Exception):
+        db.import_json(conn, data)
+    assert len(db.list_goals(conn)) == 1  # deletes rolled back
+
+
+def test_add_goal_rejects_duplicate_active_name(conn):
+    db.add_goal(conn, name="Drone", type="purchase_fund", target_agorot=100)
+    with pytest.raises(ValueError):
+        db.add_goal(conn, name="drone", type="purchase_fund", target_agorot=200)
+
+
+def test_update_goal_empty_kw_is_noop(conn):
+    gid = db.add_goal(conn, name="G", type="purchase_fund", target_agorot=100)
+    db.update_goal(conn, gid)  # must not raise

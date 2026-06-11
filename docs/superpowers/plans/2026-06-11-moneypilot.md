@@ -70,6 +70,15 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > explicit transaction or document best-effort semantics and make the handler
 > idempotent.
 
+> **Amendments (code review, Task 5):** `import_json` validates the payload
+> (schema_version match + non-empty categories) before deleting anything —
+> `--restore` with a wrong file must error, not wipe the ledger. `add_goal`
+> raises `ValueError` on a duplicate active goal name (case-insensitive) so
+> `goal_name` resolution stays unambiguous. `write_daily_backup` writes via a
+> temp file + `os.replace` (atomic; safe under OneDrive sync) and tolerates
+> prune unlink errors. `update_goal` no-ops on an empty field dict.
+> `get_goal_by_name`'s LIKE fallback orders by `LENGTH(name), id`.
+
 ---
 
 ### Task 1: Project scaffolding & test harness
