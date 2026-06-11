@@ -101,11 +101,3 @@ def category_id_by_name(conn, name):
     row = conn.execute("SELECT id FROM categories WHERE LOWER(name)=LOWER(?)",
                        (name.strip(),)).fetchone()
     return row["id"] if row else None
-
-
-# --- budgets --------------------------------------------------------------
-
-def set_budget(conn, category_id, amount_agorot) -> None:
-    conn.execute("INSERT OR REPLACE INTO budgets(category_id, amount_agorot) VALUES(?,?)",
-                 (category_id, amount_agorot))
-    conn.commit()
