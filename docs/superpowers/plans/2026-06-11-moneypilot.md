@@ -60,6 +60,16 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > `put_briefing`) must hold `self._lock` — not only the entry/edit paths; and
 > `save_settings` must skip `None` values (else `str(None)` would store "None").
 
+> **Amendments (code review, Task 4):** `update_transaction` is a no-op when no
+> fields are passed (Task 15's `update_txn` can produce an empty dict). `add_rule`
+> raises `ValueError` on a blank pattern — a stored "" would substring-match every
+> entry and silently hijack Task 13's rule fast path. Explicit `created_at=` is
+> ISO-normalized via `_iso`. **Task 15 note:** `onboarding_complete`'s
+> `with self.conn:` does NOT make the helper-based writes atomic — every db helper
+> autocommits internally; either perform onboarding writes as raw statements in one
+> explicit transaction or document best-effort semantics and make the handler
+> idempotent.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

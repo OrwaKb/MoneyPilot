@@ -1,5 +1,7 @@
 import datetime as dt
 
+import pytest
+
 from app import db
 
 D = dt.date(2026, 6, 11)
@@ -45,3 +47,18 @@ def test_rules_match_substring_case_insensitive(conn):
     db.add_rule(conn, "falafel", food)
     assert db.match_rule(conn, "45 FALAFEL with karim") == food
     assert db.match_rule(conn, "bus ticket") is None
+
+def test_update_empty_kw_is_noop(conn):
+    tid = _add(conn)
+    db.update_transaction(conn, tid)  # no fields: must not raise
+    assert db.list_transactions(conn)[0]["description"] == "falafel"
+
+def test_add_rule_rejects_blank_pattern(conn):
+    food = db.category_id_by_name(conn, "Food out")
+    with pytest.raises(ValueError):
+        db.add_rule(conn, "   ", food)
+
+def test_needs_review_filter(conn):
+    _add(conn, needs_review=1)
+    _add(conn)
+    assert len(db.list_transactions(conn, needs_review=True)) == 1

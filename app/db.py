@@ -122,7 +122,8 @@ def add_transaction(conn, *, created_at=None, **kw) -> int:
     if bad:
         raise ValueError(f"unknown transaction fields: {bad}")
     kw = {k: _iso(v) for k, v in kw.items()}
-    kw["created_at"] = created_at or dt.datetime.now().isoformat(timespec="seconds")
+    kw["created_at"] = (_iso(created_at) if created_at
+                        else dt.datetime.now().isoformat(timespec="seconds"))
     cols = ",".join(kw)
     cur = conn.execute(
         f"INSERT INTO transactions({cols}) VALUES({','.join('?'*len(kw))})",
@@ -135,6 +136,8 @@ def update_transaction(conn, txn_id: int, **kw) -> None:
     bad = set(kw) - _TXN_FIELDS
     if bad:
         raise ValueError(f"unknown transaction fields: {bad}")
+    if not kw:
+        return
     kw = {k: _iso(v) for k, v in kw.items()}
     sets = ",".join(f"{k}=?" for k in kw)
     conn.execute(f"UPDATE transactions SET {sets} WHERE id=?",
@@ -187,9 +190,11 @@ def list_transactions(conn, *, start=None, end=None, category_id=None, text=None
 # --- learned category rules -------------------------------------------------
 
 def add_rule(conn, pattern: str, category_id: int, created_from_txn=None) -> None:
+    pattern = pattern.strip().lower()
+    if not pattern:
+        raise ValueError("empty rule pattern")
     conn.execute("INSERT INTO category_rules(pattern, category_id, created_from_txn)"
-                 " VALUES(?,?,?)", (pattern.strip().lower(), category_id,
-                                    created_from_txn))
+                 " VALUES(?,?,?)", (pattern, category_id, created_from_txn))
     conn.commit()
 
 
