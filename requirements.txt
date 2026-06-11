@@ -1,0 +1,5 @@
+pywebview>=5.1
+claude-agent-sdk>=0.1.0
+pydantic>=2.7
+requests>=2.32
+pytest>=8.2
