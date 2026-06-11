@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from decimal import Decimal
 
 import requests
 
 from app import db
 from app.models import to_agorot
 
-RATES_URL = "https://api.frankfurter.app/latest?base=ILS&symbols=USD,EUR,GBP"
+RATES_URL = "https://api.frankfurter.app/latest?base=ILS"
 FALLBACK_RATES = {"USD": 3.7, "EUR": 4.0, "GBP": 4.7}  # 1 unit → ILS
 MAX_AGE_DAYS = 7
 
@@ -23,19 +24,24 @@ def _fetch() -> dict:
 
 def get_rates(conn, today: dt.date) -> dict:
     raw = db.get_setting(conn, "fx_rates_json")
+    stored_rates = None
     if raw:
-        stored = json.loads(raw)
-        age = (today - dt.date.fromisoformat(stored["fetched"])).days
-        if age <= MAX_AGE_DAYS:
-            return stored["rates"]
+        try:
+            stored = json.loads(raw)
+            stored_rates = stored["rates"]
+            age = (today - dt.date.fromisoformat(stored["fetched"])).days
+            if age <= MAX_AGE_DAYS:
+                return stored_rates
+        except (ValueError, KeyError, TypeError):
+            stored_rates = None  # corrupt cache: refetch below
     try:
         rates = _fetch()
         db.set_setting(conn, "fx_rates_json",
                        json.dumps({"fetched": today.isoformat(), "rates": rates}))
         return rates
     except Exception:
-        if raw:
-            return json.loads(raw)["rates"]  # stale beats nothing
+        if stored_rates is not None:
+            return stored_rates  # stale beats nothing
         return dict(FALLBACK_RATES)
 
 
@@ -46,4 +52,4 @@ def to_ils(amount: float, currency: str, rates: dict):
     rate = rates.get(currency) or FALLBACK_RATES.get(currency)
     if rate is None:
         raise ValueError(f"no FX rate for {currency}")
-    return to_agorot(amount * rate), rate
+    return to_agorot(Decimal(str(amount)) * Decimal(str(rate))), rate

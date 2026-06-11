@@ -109,6 +109,16 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > behavior: with no completed cycle, pace falls back to the current cycle's
 > net-so-far, which is optimistic right after salary day.
 
+> **Amendments (code review, Task 9):** `get_rates` survives a corrupt
+> `fx_rates_json` (self-heals by refetching). `RATES_URL` fetches ALL
+> frankfurter currencies (no `&symbols=` filter) so JPY-style entries convert;
+> `FALLBACK_RATES` remains the offline floor for USD/EUR/GBP only. `to_ils`
+> multiplies via `Decimal` (no 1-agora float drift). **Task 13 note:** `_store`
+> must catch `ValueError` from `fx.to_ils` (unknown currency while offline) and
+> save the entry as `needs_review` with the raw amount in `description` rather
+> than raising — entries are never lost. **Known v1 gap (spec §5.8):** manual
+> FX-rate override in settings is not implemented by any task.
+
 ---
 
 ### Task 1: Project scaffolding & test harness
