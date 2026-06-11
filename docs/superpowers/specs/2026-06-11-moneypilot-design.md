@@ -78,7 +78,7 @@ Project - Finance Tracker/
     dev_seed.py        # fake-data dev mode seeding
   tests/               # pytest; Claude fully mocked
   docs/superpowers/specs/
-  backups/             # nightly JSON exports (synced by OneDrive), keep last 30
+  backups/             # daily JSON exports, written on app open (synced by OneDrive), keep last 30
 ```
 
 ### Dependencies (runtime)
@@ -97,11 +97,13 @@ Project - Finance Tracker/
   Other income.
 - **category_rules**: id, pattern (merchant/keyword), category_id, created_from_txn —
   written when the user re-categorizes; exact-match fast path + injected into parse prompts.
-- **budgets**: category_id, amount_agorot, cycle_anchor (per salary cycle).
+- **budgets**: category_id, amount_agorot — the current per-cycle budget, one row per
+  category. (No per-cycle history in v1; past-cycle comparisons use actual spend.)
 - **goals**: id, name, emoji, type (save_by_date|purchase_fund), target_agorot,
   target_date (nullable for funds), status, created_at.
 - **settings** (key/value): user_name, salary_day, salary_amount_agorot, card_charge_day,
-  fixed_bills_total_agorot, fx_rates_json + fetched_at, schema_version.
+  opening_balance_agorot + opening_balance_date (from onboarding; current balance =
+  opening balance + sum of transactions since), fx_rates_json + fetched_at, schema_version.
 - **chat_history**: id, ts, role, text (advisor tab continuity; cleared per user request).
 - **briefings**: date, text, fact_pack_json (cache: one briefing per local date).
 
@@ -165,8 +167,11 @@ manual edits.
 ## 7. UI spec (dark Mission Control, tabbed cockpit)
 
 - **Entry bar** (always visible, top): input + status chips area.
-- **Overview**: Safe-to-spend today (hero number) = (discretionary budget remaining this
-  cycle) ÷ (days left incl. today), where discretionary = total budget − fixed bills;
+- **Overview**: Safe-to-spend today (hero number) = (sum of discretionary category
+  budgets − discretionary expenses this cycle) ÷ (days left incl. today). "Discretionary"
+  = every expense category except Bills; Bills has its own budget and is excluded from
+  the pool. Goal contributions are transfers, not spending — they don't reduce
+  safe-to-spend in v1 (the advisor reasons about them in prose);
   cycle gauge (day X of N); category bars (spent vs budget, amber >100% pace); upcoming
   card charge panel (₪ accrued, T−n days); goal mini-bars; briefing panel; recent-entries
   ticker (last 5, with undo).
@@ -177,9 +182,10 @@ manual edits.
   pace, projected completion date, safe-to-buy verdict (funds), add/edit/archive.
 - **Advisor**: chat thread; briefing history; action confirm cards.
 - **Onboarding (first run)**: chat-style wizard — name → salary amount + day → card charge
-  day → fixed bills → brain-dump ("tell me what you have now and what you've spent this
-  month so far") → Claude proposes opening balance, month-to-date entries, and per-category
-  budgets → user reviews/edits → confirm writes everything in one transaction.
+  day → fixed monthly bills (seeds the Bills category budget) → brain-dump ("tell me what
+  you have now and what you've spent this month so far") → Claude proposes the opening
+  balance (stored in settings), month-to-date entries, and per-category budgets → user
+  reviews/edits → confirm writes everything in one transaction.
 - Hebrew/Arabic/English input all supported (Claude handles language; UI is LTR English).
 
 ## 8. Reliability & error handling
