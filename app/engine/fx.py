@@ -29,6 +29,8 @@ def get_rates(conn, today: dt.date) -> dict:
         try:
             stored = json.loads(raw)
             stored_rates = stored["rates"]
+            if not isinstance(stored_rates, dict):
+                raise ValueError("rates not a dict")
             age = (today - dt.date.fromisoformat(stored["fetched"])).days
             if age <= MAX_AGE_DAYS:
                 return stored_rates

@@ -48,3 +48,9 @@ def test_get_rates_stale_beats_fallback(conn, monkeypatch):
 def test_get_rates_offline_cold_returns_fallback_table(conn, monkeypatch):
     monkeypatch.setattr(fx, "_fetch", lambda: (_ for _ in ()).throw(OSError()))
     assert fx.get_rates(conn, TODAY) == fx.FALLBACK_RATES
+
+def test_get_rates_wrong_typed_rates_self_heals(conn, monkeypatch):
+    db.set_setting(conn, "fx_rates_json", json.dumps(
+        {"fetched": TODAY.isoformat(), "rates": 5}))
+    monkeypatch.setattr(fx, "_fetch", lambda: {"USD": 3.5})
+    assert fx.get_rates(conn, TODAY) == {"USD": 3.5}
