@@ -51,6 +51,7 @@ def _projection(conn, goal_id: int, remaining: int, today: dt.date):
 
 def goal_report(conn, today: dt.date) -> list[dict]:
     out = []
+    pace = None  # computed at most once; goal-independent
     for g in db.list_goals(conn):
         progress = goal_progress(conn, g["id"])
         target = g["target_agorot"]
@@ -63,11 +64,12 @@ def goal_report(conn, today: dt.date) -> list[dict]:
             pace_needed = int(remaining / months_left)
         if remaining == 0:
             verdict = "ready"
-        elif g["type"] == "purchase_fund":
+        elif g["type"] == "purchase_fund" or pace_needed is None:
             verdict = f"{fmt_ils(remaining)} to go"
         else:
-            verdict = "on track" if pace_needed is not None and \
-                monthly_savings_pace(conn, today) >= pace_needed else "behind"
+            if pace is None:
+                pace = monthly_savings_pace(conn, today)
+            verdict = "on track" if pace >= pace_needed else "behind"
         out.append({
             "id": g["id"], "name": g["name"], "emoji": g["emoji"],
             "type": g["type"], "target_agorot": target,

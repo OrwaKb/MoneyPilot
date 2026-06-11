@@ -97,6 +97,18 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > pace_ratio is linear proration, so day-1/2 lumpy spends flare amber and
 > self-correct within days.
 
+> **Amendments (code review, Task 8):** A dateless `save_by_date` goal now gets
+> the "₪X to go" verdict instead of permanently "behind"; `goal_report` computes
+> `monthly_savings_pace` once, not per goal. **Known limitation (multi-goal):**
+> each dated goal's "on track" compares the FULL savings pace against its own
+> need — two goals can both claim the same surplus. **Task 10 must add**
+> `total_pace_needed_agorot` (sum of dated goals' pace_needed) next to
+> `monthly_savings_pace_agorot` in the fact-pack, and **Task 11's briefing/chat
+> system prompts must say**: "savings pace is shared across all goals — if the
+> sum of pace_needed exceeds the pace, point out the conflict." Accepted v1
+> behavior: with no completed cycle, pace falls back to the current cycle's
+> net-so-far, which is optimistic right after salary day.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

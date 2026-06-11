@@ -48,3 +48,46 @@ def test_no_contributions_no_projection(seeded):
     db.add_goal(seeded, name="Empty", type="purchase_fund", target_agorot=5000)
     (r,) = goals.goal_report(seeded, TODAY)
     assert r["progress_agorot"] == 0 and r["projected_date"] is None
+
+
+def _cycle_income_and_spend(conn, month, income=900000, spend=50000):
+    # salary lands on the 10th; one expense mid-cycle
+    db.add_transaction(conn, effective_date=dt.date(2026, month, 10),
+                       amount_agorot=income, direction="income",
+                       category_id=db.category_id_by_name(conn, "Salary"))
+    db.add_transaction(conn, effective_date=dt.date(2026, month, 15),
+                       amount_agorot=-spend, direction="expense",
+                       category_id=db.category_id_by_name(conn, "Food out"))
+
+
+def test_monthly_savings_pace_averages_completed_cycles(seeded):
+    for m in (3, 4, 5):  # cycles Mar10-Apr9, Apr10-May9, May10-Jun9
+        _cycle_income_and_spend(seeded, m)
+    assert goals.monthly_savings_pace(seeded, TODAY) == 850000
+
+def test_monthly_savings_pace_skips_empty_cycles(seeded):
+    _cycle_income_and_spend(seeded, 5)  # only one active prior cycle
+    assert goals.monthly_savings_pace(seeded, TODAY) == 850000
+
+def test_monthly_savings_pace_fallback_current_cycle(seeded):
+    db.add_transaction(seeded, effective_date=dt.date(2026, 6, 10),
+                       amount_agorot=900000, direction="income",
+                       category_id=db.category_id_by_name(seeded, "Salary"))
+    assert goals.monthly_savings_pace(seeded, TODAY) == 900000
+
+def test_dated_goal_verdicts(seeded):
+    for m in (3, 4, 5):
+        _cycle_income_and_spend(seeded, m)  # pace 850000
+    db.add_goal(seeded, name="Easy", type="save_by_date",
+                target_agorot=100000, target_date=dt.date(2026, 12, 1))
+    db.add_goal(seeded, name="Hard", type="save_by_date",
+                target_agorot=99000000, target_date=dt.date(2026, 12, 1))
+    rows = {r["name"]: r for r in goals.goal_report(seeded, TODAY)}
+    assert rows["Easy"]["verdict"] == "on track"
+    assert rows["Hard"]["verdict"] == "behind"
+
+def test_dateless_save_by_date_falls_back_to_amount_verdict(seeded):
+    db.add_goal(seeded, name="Someday", type="save_by_date",
+                target_agorot=100000)  # no target_date
+    (r,) = goals.goal_report(seeded, TODAY)
+    assert r["verdict"].endswith("to go")
