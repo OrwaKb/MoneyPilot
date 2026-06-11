@@ -44,6 +44,13 @@ app/api.py              class Api  (pywebview js_api — one method per UI comma
 
 Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expense −, goal_contribution −); expense sums in reports use absolute values; "discretionary" = expense categories with `is_fixed=0`.
 
+> **Amendments (code review, Task 2):** `to_agorot` raises `ValueError` (not
+> `decimal.InvalidOperation`) on junk input. `ParsedTxn.amount` rejects inf/NaN
+> (`allow_inf_nan=False`). `ParsedTxn.currency` normalizes aliases
+> (NIS/SHEKEL/₪→ILS, $→USD, €→EUR) and **raises** on non-3-letter codes instead
+> of truncating — invalid currency now engages the Task 13 AI repair loop as a
+> `ValidationError`.
+
 ---
 
 ### Task 1: Project scaffolding & test harness
