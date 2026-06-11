@@ -210,3 +210,126 @@ def list_rules(conn) -> list:
     return list(conn.execute(
         "SELECT r.*, c.name AS category_name FROM category_rules r"
         " JOIN categories c ON c.id=r.category_id ORDER BY r.id"))
+
+
+# --- goals -------------------------------------------------------------------
+
+_GOAL_FIELDS = {"name", "emoji", "type", "target_agorot", "target_date", "status"}
+
+
+def add_goal(conn, *, name, type, target_agorot, emoji="🎯", target_date=None) -> int:
+    cur = conn.execute(
+        "INSERT INTO goals(name, emoji, type, target_agorot, target_date,"
+        " status, created_at) VALUES(?,?,?,?,?,'active',?)",
+        (name, emoji, type, target_agorot, _iso(target_date),
+         dt.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_goal(conn, goal_id: int, **kw) -> None:
+    bad = set(kw) - _GOAL_FIELDS
+    if bad:
+        raise ValueError(f"unknown goal fields: {bad}")
+    kw = {k: _iso(v) for k, v in kw.items()}
+    sets = ",".join(f"{k}=?" for k in kw)
+    conn.execute(f"UPDATE goals SET {sets} WHERE id=?", (*kw.values(), goal_id))
+    conn.commit()
+
+
+def list_goals(conn, include_archived=False) -> list:
+    q = "SELECT * FROM goals"
+    if not include_archived:
+        q += " WHERE status='active'"
+    return list(conn.execute(q + " ORDER BY id"))
+
+
+def get_goal_by_name(conn, name: str):
+    row = conn.execute(
+        "SELECT * FROM goals WHERE status='active' AND LOWER(name)=LOWER(?)",
+        (name.strip(),)).fetchone()
+    if row:
+        return row
+    return conn.execute(
+        "SELECT * FROM goals WHERE status='active' AND LOWER(name) LIKE ?",
+        (f"%{name.strip().lower()}%",)).fetchone()
+
+
+# --- budgets / briefings / chat ----------------------------------------------
+
+def set_budget(conn, category_id: int, amount_agorot: int) -> None:
+    conn.execute("INSERT OR REPLACE INTO budgets(category_id, amount_agorot)"
+                 " VALUES(?,?)", (category_id, amount_agorot))
+    conn.commit()
+
+
+def get_budgets(conn) -> dict:
+    return {r["category_id"]: r["amount_agorot"]
+            for r in conn.execute("SELECT * FROM budgets")}
+
+
+def get_briefing(conn, date_iso: str):
+    return conn.execute("SELECT * FROM briefings WHERE date=?",
+                        (date_iso,)).fetchone()
+
+
+def put_briefing(conn, date_iso: str, text: str, fact_pack_json: str) -> None:
+    conn.execute("INSERT OR REPLACE INTO briefings(date, text, fact_pack_json)"
+                 " VALUES(?,?,?)", (date_iso, text, fact_pack_json))
+    conn.commit()
+
+
+def add_chat(conn, role: str, text: str) -> None:
+    conn.execute("INSERT INTO chat_history(ts, role, text) VALUES(?,?,?)",
+                 (dt.datetime.now().isoformat(timespec="seconds"), role, text))
+    conn.commit()
+
+
+def recent_chat(conn, n: int) -> list:
+    rows = list(conn.execute(
+        "SELECT * FROM chat_history ORDER BY id DESC LIMIT ?", (n,)))
+    return rows[::-1]  # oldest first
+
+
+# --- backup / restore ----------------------------------------------------------
+
+_EXPORT_TABLES = ["categories", "goals", "transactions", "category_rules",
+                  "budgets", "settings", "chat_history", "briefings"]
+
+
+def export_json(conn) -> dict:
+    out = {"schema_version": SCHEMA_VERSION}
+    for t in _EXPORT_TABLES:
+        out[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}")]
+    return out
+
+
+def import_json(conn, data: dict) -> None:
+    with conn:  # single transaction
+        for t in reversed(_EXPORT_TABLES):
+            conn.execute(f"DELETE FROM {t}")
+        for t in _EXPORT_TABLES:
+            rows = data.get(t, [])
+            if not rows:
+                continue
+            cols = list(rows[0].keys())
+            conn.executemany(
+                f"INSERT INTO {t}({','.join(cols)})"
+                f" VALUES({','.join('?'*len(cols))})",
+                [tuple(r[c] for c in cols) for r in rows])
+    conn.commit()
+
+
+def write_daily_backup(conn, backup_dir, today: dt.date):
+    """Write backups/ledger-YYYY-MM-DD.json once per day; prune to 30 files."""
+    bdir = Path(backup_dir)
+    bdir.mkdir(parents=True, exist_ok=True)
+    target = bdir / f"ledger-{today.isoformat()}.json"
+    if target.exists():
+        return None
+    target.write_text(json.dumps(export_json(conn), ensure_ascii=False, indent=1),
+                      encoding="utf-8")
+    backups = sorted(bdir.glob("ledger-*.json"))
+    for old in backups[:-30]:
+        old.unlink()
+    return target
