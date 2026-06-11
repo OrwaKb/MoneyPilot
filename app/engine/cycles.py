@@ -4,6 +4,11 @@ import calendar
 import datetime as dt
 
 
+def _check_day(day: int) -> None:
+    if not 1 <= day <= 31:
+        raise ValueError(f"day-of-month must be 1..31, got {day}")
+
+
 def clamped_date(year: int, month: int, day: int) -> dt.date:
     """The requested day, clamped to the month's last day (salary day 31 → Jun 30)."""
     return dt.date(year, month, min(day, calendar.monthrange(year, month)[1]))
@@ -28,6 +33,11 @@ def _last_anchor(today: dt.date, day: int) -> dt.date:
 
 
 def salary_cycle(today: dt.date, salary_day: int) -> dict:
+    """The salary cycle containing `today` (anchors clamp in short months).
+    Returns: start (cycle's clamped salary date), end (INCLUSIVE, day before
+    the next anchor), day_index (1-based: start day == 1), length (days),
+    days_left (counting today)."""
+    _check_day(salary_day)
     start = _last_anchor(today, salary_day)
     nxt = _next_anchor(today, salary_day)
     return {
@@ -44,8 +54,10 @@ def card_window(today: dt.date, charge_day: int) -> dict:
     A purchase ON a charge date belongs to the next statement, so:
     start = last charge date <= today, charge_date = first charge date > today,
     and accrual sums purchases with start <= date < charge_date."""
+    _check_day(charge_day)
+    nxt = _next_anchor(today, charge_day)
     return {
         "start": _last_anchor(today, charge_day),
-        "charge_date": _next_anchor(today, charge_day),
-        "days_to_charge": (_next_anchor(today, charge_day) - today).days,
+        "charge_date": nxt,
+        "days_to_charge": (nxt - today).days,
     }

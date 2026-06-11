@@ -1,5 +1,7 @@
 import datetime as dt
 
+import pytest
+
 from app.engine.cycles import card_window, clamped_date, salary_cycle
 
 
@@ -51,3 +53,25 @@ def test_card_window_feb_leap():
     # Feb 2024 anchor clamps to Feb 29 → today is a charge day
     assert w["start"] == dt.date(2024, 2, 29)
     assert w["charge_date"] == dt.date(2024, 3, 30)
+
+def test_rejects_out_of_range_days():
+    with pytest.raises(ValueError):
+        salary_cycle(dt.date(2026, 6, 11), salary_day=0)
+    with pytest.raises(ValueError):
+        card_window(dt.date(2026, 6, 11), charge_day=32)
+
+def test_day31_cycles_contiguous_across_feb():
+    # Walk all of 2026 at salary_day=31: every cycle must start the day
+    # after the previous one ends — no gaps or overlaps around Feb 28.
+    d = dt.date(2026, 1, 1)
+    prev_start = None
+    while d < dt.date(2027, 1, 1):
+        c = salary_cycle(d, salary_day=31)
+        if prev_start is not None and c["start"] != prev_start:
+            prev = salary_cycle(c["start"] - dt.timedelta(days=1), salary_day=31)
+            assert prev["end"] == c["start"] - dt.timedelta(days=1)
+        prev_start = c["start"]
+        d += dt.timedelta(days=1)
+    feb_cycle = salary_cycle(dt.date(2026, 3, 15), salary_day=31)
+    assert feb_cycle["start"] == dt.date(2026, 2, 28)
+    assert feb_cycle["end"] == dt.date(2026, 3, 30)

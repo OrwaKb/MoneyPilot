@@ -79,6 +79,14 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > prune unlink errors. `update_goal` no-ops on an empty field dict.
 > `get_goal_by_name`'s LIKE fallback orders by `LENGTH(name), id`.
 
+> **Amendments (code review, Task 6):** `salary_cycle`/`card_window` validate the
+> day-of-month (1..31) and raise `ValueError` otherwise — day 32 was silently
+> treated as 31. `salary_cycle` now documents its dict contract (end INCLUSIVE,
+> day_index 1-based, days_left counts today). `db.add_goal` stores the stripped
+> goal name. **Tasks 14/15 note:** validate `salary_day`/`card_charge_day` as
+> ints in 1..31 at write time too — in `onboarding_complete` and in the advisor's
+> `adjust_setting` action (LLM-produced values must not be stored verbatim).
+
 ---
 
 ### Task 1: Project scaffolding & test harness

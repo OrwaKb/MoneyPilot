@@ -219,8 +219,9 @@ _GOAL_FIELDS = {"name", "emoji", "type", "target_agorot", "target_date", "status
 
 
 def add_goal(conn, *, name, type, target_agorot, emoji="🎯", target_date=None) -> int:
+    name = name.strip()
     if conn.execute("SELECT 1 FROM goals WHERE status='active'"
-                    " AND LOWER(name)=LOWER(?)", (name.strip(),)).fetchone():
+                    " AND LOWER(name)=LOWER(?)", (name,)).fetchone():
         raise ValueError(f"goal '{name}' already exists")
     cur = conn.execute(
         "INSERT INTO goals(name, emoji, type, target_agorot, target_date,"
