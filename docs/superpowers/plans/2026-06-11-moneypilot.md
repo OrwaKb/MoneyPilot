@@ -87,6 +87,16 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > ints in 1..31 at write time too — in `onboarding_complete` and in the advisor's
 > `adjust_setting` action (LLM-produced values must not be stored verbatim).
 
+> **Amendments (code review, Task 7):** `category_status` reports
+> `pace_ratio: None` (JSON `null`) for a category with spend but no budget —
+> 0.0 read as "healthy/green" in the UI and kept the offline briefing silent
+> about unplanned spend. Consumers (Tasks 10/16/18): `null > 1.1` is false in
+> JS so amber logic needs no change, but render unbudgeted rows distinctly
+> (e.g. "unbudgeted" tag) rather than a 0% green bar. Keep fact-pack values
+> strictly JSON-safe — never use `inf`/`NaN` sentinels. Known accepted noise:
+> pace_ratio is linear proration, so day-1/2 lumpy spends flare amber and
+> self-correct within days.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

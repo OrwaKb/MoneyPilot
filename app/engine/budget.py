@@ -65,11 +65,11 @@ def category_status(conn, today: dt.date) -> list[dict]:
         bud = budgets.get(c["id"], 0)
         if bud == 0 and spent == 0:
             continue
-        ratio = (spent / bud) / progress if bud > 0 and progress > 0 else 0.0
+        ratio = round((spent / bud) / progress, 2) if bud > 0 else None
         out.append({"category_id": c["id"], "name": c["name"],
                     "emoji": c["emoji"], "is_fixed": bool(c["is_fixed"]),
                     "spent_agorot": spent, "budget_agorot": bud,
-                    "pace_ratio": round(ratio, 2)})
+                    "pace_ratio": ratio})
     return out
 
 

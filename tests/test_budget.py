@@ -55,3 +55,25 @@ def test_cycle_net(seeded):
     income, expenses = budget.cycle_net(seeded, dt.date(2026, 6, 10),
                                         dt.date(2026, 7, 9))
     assert income == 900000 and expenses == 4500
+
+def test_safe_to_spend_overspent_clamps_to_zero(seeded):
+    _spend(seeded, "Food out", 999999)  # blow the whole pool
+    s = budget.safe_to_spend(seeded, TODAY)
+    assert s["remaining_agorot"] < 0 and s["today_agorot"] == 0
+
+def test_soft_deleted_excluded_from_spend(seeded):
+    _spend(seeded, "Food out", 4500)
+    tid = db.list_transactions(seeded)[0]["id"]
+    db.soft_delete_transaction(seeded, tid)
+    assert budget.safe_to_spend(seeded, TODAY)["spent_agorot"] == 0
+
+def test_card_purchase_on_charge_date_rolls_to_next_statement(seeded):
+    _spend(seeded, "Food out", 5000, day=dt.date(2026, 7, 2))  # ON charge day
+    acc = budget.card_accrual(seeded, TODAY)  # window Jun 2 .. Jul 1
+    assert acc["total_agorot"] == 0
+
+def test_unbudgeted_spend_has_null_pace(seeded):
+    _spend(seeded, "Health", 50000)  # Health has no budget in seeds
+    rows = {r["name"]: r for r in budget.category_status(seeded, TODAY)}
+    assert rows["Health"]["spent_agorot"] == 50000
+    assert rows["Health"]["pace_ratio"] is None
