@@ -103,3 +103,105 @@ def category_id_by_name(conn, name):
     row = conn.execute("SELECT id FROM categories WHERE LOWER(name)=LOWER(?)",
                        (name.strip(),)).fetchone()
     return row["id"] if row else None
+
+
+# --- transactions -----------------------------------------------------------
+
+_TXN_FIELDS = {"effective_date", "amount_agorot", "direction", "currency_orig",
+               "amount_orig", "fx_rate", "category_id", "description", "merchant",
+               "people", "payment_method", "goal_id", "raw_text", "source",
+               "ai_confidence", "needs_review"}
+
+
+def _iso(v):
+    return v.isoformat() if isinstance(v, (dt.date, dt.datetime)) else v
+
+
+def add_transaction(conn, *, created_at=None, **kw) -> int:
+    bad = set(kw) - _TXN_FIELDS
+    if bad:
+        raise ValueError(f"unknown transaction fields: {bad}")
+    kw = {k: _iso(v) for k, v in kw.items()}
+    kw["created_at"] = created_at or dt.datetime.now().isoformat(timespec="seconds")
+    cols = ",".join(kw)
+    cur = conn.execute(
+        f"INSERT INTO transactions({cols}) VALUES({','.join('?'*len(kw))})",
+        tuple(kw.values()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def update_transaction(conn, txn_id: int, **kw) -> None:
+    bad = set(kw) - _TXN_FIELDS
+    if bad:
+        raise ValueError(f"unknown transaction fields: {bad}")
+    kw = {k: _iso(v) for k, v in kw.items()}
+    sets = ",".join(f"{k}=?" for k in kw)
+    conn.execute(f"UPDATE transactions SET {sets} WHERE id=?",
+                 (*kw.values(), txn_id))
+    conn.commit()
+
+
+def soft_delete_transaction(conn, txn_id: int) -> None:
+    conn.execute("UPDATE transactions SET deleted_at=? WHERE id=?",
+                 (dt.datetime.now().isoformat(timespec="seconds"), txn_id))
+    conn.commit()
+
+
+def undelete_transaction(conn, txn_id: int) -> None:
+    conn.execute("UPDATE transactions SET deleted_at=NULL WHERE id=?", (txn_id,))
+    conn.commit()
+
+
+def list_transactions(conn, *, start=None, end=None, category_id=None, text=None,
+                      direction=None, payment_method=None, needs_review=None,
+                      include_deleted=False, limit=None) -> list:
+    q = ("SELECT t.*, c.name AS category_name, c.emoji AS category_emoji"
+         " FROM transactions t LEFT JOIN categories c ON c.id=t.category_id"
+         " WHERE 1=1")
+    args: list = []
+    if not include_deleted:
+        q += " AND t.deleted_at IS NULL"
+    if start:
+        q += " AND t.effective_date >= ?"; args.append(_iso(start))
+    if end:
+        q += " AND t.effective_date <= ?"; args.append(_iso(end))
+    if category_id:
+        q += " AND t.category_id = ?"; args.append(category_id)
+    if direction:
+        q += " AND t.direction = ?"; args.append(direction)
+    if payment_method:
+        q += " AND t.payment_method = ?"; args.append(payment_method)
+    if needs_review is not None:
+        q += " AND t.needs_review = ?"; args.append(int(needs_review))
+    if text:
+        q += (" AND (t.description LIKE ? OR t.merchant LIKE ?"
+              " OR t.raw_text LIKE ?)")
+        args += [f"%{text}%"] * 3
+    q += " ORDER BY t.effective_date DESC, t.id DESC"
+    if limit:
+        q += " LIMIT ?"; args.append(limit)
+    return list(conn.execute(q, args))
+
+
+# --- learned category rules -------------------------------------------------
+
+def add_rule(conn, pattern: str, category_id: int, created_from_txn=None) -> None:
+    conn.execute("INSERT INTO category_rules(pattern, category_id, created_from_txn)"
+                 " VALUES(?,?,?)", (pattern.strip().lower(), category_id,
+                                    created_from_txn))
+    conn.commit()
+
+
+def match_rule(conn, text: str):
+    low = text.lower()
+    for r in conn.execute("SELECT * FROM category_rules ORDER BY id DESC"):
+        if r["pattern"] in low:
+            return r["category_id"]
+    return None
+
+
+def list_rules(conn) -> list:
+    return list(conn.execute(
+        "SELECT r.*, c.name AS category_name FROM category_rules r"
+        " JOIN categories c ON c.id=r.category_id ORDER BY r.id"))
