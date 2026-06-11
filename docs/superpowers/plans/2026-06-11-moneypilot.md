@@ -51,6 +51,15 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > of truncating — invalid currency now engages the Task 13 AI repair loop as a
 > `ValidationError`.
 
+> **Amendments (code review, Task 3):** `init_db` stamps `schema_version` with
+> `INSERT OR IGNORE` (not REPLACE) so a future migration runner can read the DB's
+> true version. The `transactions` table has a CHECK enforcing the sign convention
+> (income > 0; expense/goal_contribution < 0); `category_rules.created_from_txn`
+> now has `REFERENCES transactions(id)`. **Task 15 note:** every `Api` method that
+> writes (including `startup`'s `resweep`, `chat_send`, and `get_briefing`'s
+> `put_briefing`) must hold `self._lock` — not only the entry/edit paths; and
+> `save_settings` must skip `None` values (else `str(None)` would store "None").
+
 ---
 
 ### Task 1: Project scaffolding & test harness

@@ -37,11 +37,13 @@ CREATE TABLE IF NOT EXISTS transactions(
     CHECK(payment_method IN ('card','cash','transfer')),
   goal_id INTEGER REFERENCES goals(id), raw_text TEXT,
   source TEXT NOT NULL DEFAULT 'manual', ai_confidence REAL,
-  needs_review INTEGER NOT NULL DEFAULT 0, deleted_at TEXT);
+  needs_review INTEGER NOT NULL DEFAULT 0, deleted_at TEXT,
+  CHECK((direction='income' AND amount_agorot>0)
+        OR (direction!='income' AND amount_agorot<0)));
 CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(effective_date);
 CREATE TABLE IF NOT EXISTS category_rules(
   id INTEGER PRIMARY KEY, pattern TEXT NOT NULL,
-  category_id INTEGER NOT NULL REFERENCES categories(id), created_from_txn INTEGER);
+  category_id INTEGER NOT NULL REFERENCES categories(id), created_from_txn INTEGER REFERENCES transactions(id));
 CREATE TABLE IF NOT EXISTS budgets(
   category_id INTEGER PRIMARY KEY REFERENCES categories(id),
   amount_agorot INTEGER NOT NULL);
@@ -72,7 +74,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             "INSERT INTO categories(name, emoji, is_income, is_fixed, sort)"
             " VALUES(?,?,?,?,?)",
             [(n, e, i, f, idx) for idx, (n, e, i, f) in enumerate(DEFAULT_CATEGORIES)])
-    conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
+    conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
 

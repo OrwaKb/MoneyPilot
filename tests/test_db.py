@@ -1,3 +1,7 @@
+import sqlite3
+
+import pytest
+
 from app import db
 
 
@@ -24,3 +28,23 @@ def test_settings_roundtrip(conn):
 def test_category_id_by_name_case_insensitive(conn):
     assert db.category_id_by_name(conn, "food OUT") is not None
     assert db.category_id_by_name(conn, "nope") is None
+
+
+def test_foreign_keys_enforced(conn):
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO category_rules(pattern, category_id)"
+                     " VALUES('x', 9999)")
+
+
+def test_amount_sign_convention_enforced(conn):
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO transactions(created_at, effective_date,"
+                     " amount_agorot, direction) VALUES('t', '2026-06-11',"
+                     " 4500, 'expense')")  # expense must be negative
+
+
+def test_set_setting_overwrites(conn):
+    db.set_setting(conn, "k", "1")
+    db.set_setting(conn, "k", "2")
+    assert db.get_setting(conn, "k") == "2"
