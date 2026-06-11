@@ -20,9 +20,16 @@ def fact_pack(conn, today: dt.date) -> dict:
     income, expenses = budget.cycle_net(conn, cyc["start"], cyc["end"])
 
     opening = int(db.get_setting(conn, "opening_balance_agorot", "0"))
-    signed_sum = conn.execute(
-        "SELECT COALESCE(SUM(amount_agorot),0) AS s FROM transactions"
-        " WHERE deleted_at IS NULL").fetchone()["s"]
+    opening_date = db.get_setting(conn, "opening_balance_date")
+    q = ("SELECT COALESCE(SUM(amount_agorot),0) AS s FROM transactions t"
+         " WHERE t.deleted_at IS NULL"
+         " AND (t.direction != 'goal_contribution'"
+         " OR t.goal_id IN (SELECT id FROM goals WHERE status='active'))")
+    args: list = []
+    if opening_date:
+        q += " AND t.effective_date >= ?"
+        args.append(opening_date)
+    signed_sum = conn.execute(q, args).fetchone()["s"]
     available = opening + signed_sum
     report = goals.goal_report(conn, today)
     earmarked = sum(g["progress_agorot"] for g in report)
@@ -57,15 +64,14 @@ def fact_pack(conn, today: dt.date) -> dict:
                     "earmarked_agorot": earmarked,
                     "total_agorot": available + earmarked,
                     "total_fmt": fmt_ils(available + earmarked)},
-        "goals": [_iso_dict({**g,
-                             "projected_date": g["projected_date"]})
-                  for g in report],
+        "goals": [_iso_dict(g) for g in report],
         "monthly_savings_pace_agorot": goals.monthly_savings_pace(conn, today),
         "total_pace_needed_agorot": total_pace_needed,
         "last_cycle": {"income_agorot": prev_income,
                        "expenses_agorot": prev_expenses},
         "recent_transactions": [
             {"date": r["effective_date"], "amount_fmt": fmt_ils(r["amount_agorot"]),
-             "category": r["category_name"], "description": r["description"]}
+             "category": r["category_name"], "description": r["description"],
+             "direction": r["direction"]}
             for r in db.list_transactions(conn, limit=20)],
     }

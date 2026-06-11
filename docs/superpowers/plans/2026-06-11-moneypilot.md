@@ -119,6 +119,18 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > than raising — entries are never lost. **Known v1 gap (spec §5.8):** manual
 > FX-rate override in settings is not implemented by any task.
 
+> **Amendments (code review, Task 10):** Balance semantics fixed twice: (1)
+> contributions to archived (or goal-less) goals are RELEASED back to
+> `available` — archiving a goal no longer makes its money vanish from
+> `total`; the invariant `total = opening + income − expenses since opening`
+> always holds. (2) `available` honors `opening_balance_date` (spec §3):
+> transactions dated before it don't move the balance. **Task 14 note:**
+> `onboarding_propose` must date proposed month-to-date entries STRICTLY
+> BEFORE today (the opening balance the user states already reflects them;
+> use yesterday for "today" mentions). `recent_transactions` rows carry
+> `direction` and exactly five fields — merchant/people/raw_text never enter
+> prompts.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

@@ -40,3 +40,38 @@ def test_balance_math(seeded):
     assert fp["balance"]["available_agorot"] == 500000 + 900000 - 4500 - 171000
     assert fp["balance"]["earmarked_agorot"] == 171000
     assert fp["balance"]["total_agorot"] == 500000 + 900000 - 4500
+
+
+def test_archived_goal_money_released_to_available(seeded):
+    gid = db.add_goal(seeded, name="Drone", type="purchase_fund",
+                      target_agorot=450000)
+    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=-171000,
+                       direction="goal_contribution", goal_id=gid)
+    fp = insights.fact_pack(seeded, TODAY)
+    assert fp["balance"]["available_agorot"] == 500000 - 171000
+    assert fp["balance"]["total_agorot"] == 500000
+    db.update_goal(seeded, gid, status="archived")
+    fp = insights.fact_pack(seeded, TODAY)
+    assert fp["balance"]["available_agorot"] == 500000  # released
+    assert fp["balance"]["earmarked_agorot"] == 0
+    assert fp["balance"]["total_agorot"] == 500000      # invariant holds
+
+
+def test_balance_ignores_pre_opening_transactions(seeded):
+    # seeded opening_balance_date = 2026-06-01; this spend predates it
+    db.add_transaction(seeded, effective_date=dt.date(2026, 5, 20),
+                       amount_agorot=-9900, direction="expense",
+                       category_id=db.category_id_by_name(seeded, "Food out"))
+    fp = insights.fact_pack(seeded, TODAY)
+    assert fp["balance"]["available_agorot"] == 500000
+
+
+def test_recent_transactions_minimal_fields(seeded):
+    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=-4500,
+                       direction="expense", merchant="Falafel King",
+                       people="karim", raw_text="45 falafel with karim",
+                       description="falafel",
+                       category_id=db.category_id_by_name(seeded, "Food out"))
+    (row,) = insights.fact_pack(seeded, TODAY)["recent_transactions"]
+    assert set(row) == {"date", "amount_fmt", "category", "description",
+                        "direction"}  # merchant/people/raw_text must NOT leak
