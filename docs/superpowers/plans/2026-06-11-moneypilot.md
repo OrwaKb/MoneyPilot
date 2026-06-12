@@ -177,6 +177,14 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > the Task 3 amendment, `chat_send`/`get_briefing` MUST hold `self._lock`
 > (the plan snippets omit it).
 
+> **Amendments (code review, Task 15):** All binding notes discharged:
+> `startup`/`chat_send`/`get_briefing` hold `self._lock`; startup's backup is
+> try/except-OSError (never breaks launch); rule-learning skips income
+> categories; `save_goal`/`set_category_budget` reject non-positive amounts;
+> `save_settings` skips None; `onboarding_complete` validates everything
+> (profile days 1..31, digit-string salary, ParsedTxn entries, sanitized
+> budgets) BEFORE any write and drops the plan's misleading `with self.conn:`.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

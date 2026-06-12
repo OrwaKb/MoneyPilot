@@ -1,0 +1,305 @@
+from __future__ import annotations
+
+import csv
+import datetime as dt
+import functools
+import threading
+from pathlib import Path
+
+from app import db
+from app.ai import advisor, parser
+from app.engine import budget, goals as goals_eng, insights
+from app.models import fmt_ils, to_agorot
+
+ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
+                "card_charge_day")
+
+
+def _safe(fn):
+    """Every bridge method returns a dict; exceptions become {ok: False}."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        try:
+            out = fn(self, *args, **kwargs)
+            out.setdefault("ok", True)
+            return out
+        except Exception as e:  # surfaced in the UI as a toast
+            return {"ok": False, "error": str(e)}
+    return wrapper
+
+
+def _txn_dict(row) -> dict:
+    d = dict(row)
+    d["amount_fmt"] = fmt_ils(row["amount_agorot"])
+    return d
+
+
+class Api:
+    def __init__(self, db_path, *, backup_dir, today_fn=dt.date.today):
+        self.conn = db.connect(db_path)
+        db.init_db(self.conn)
+        self.backup_dir = Path(backup_dir)
+        self._today = today_fn
+        self._lock = threading.Lock()
+        self._window = None  # set by __main__ for focus/quit
+
+    # --- lifecycle -----------------------------------------------------------
+
+    def is_onboarded(self) -> bool:
+        return db.get_setting(self.conn, "salary_day") is not None
+
+    @_safe
+    def startup(self):
+        """Called by the UI once on load: backup + best-effort review resweep."""
+        with self._lock:
+            try:
+                db.write_daily_backup(self.conn, self.backup_dir, self._today())
+            except OSError:
+                pass  # backup is best-effort; never break startup
+            try:
+                parser.resweep(self.conn, self._today())
+            except Exception:
+                pass  # offline is fine
+        return {"onboarded": self.is_onboarded(),
+                "user_name": db.get_setting(self.conn, "user_name", "")}
+
+    # --- entries ---------------------------------------------------------------
+
+    @_safe
+    def add_entry(self, text: str):
+        with self._lock:
+            res = parser.parse_and_store(self.conn, text, self._today())
+        ids = res["entries"]
+        qmarks = ",".join("?" * len(ids))
+        rows = self.conn.execute(
+            "SELECT t.*, c.name AS category_name, c.emoji AS category_emoji"
+            " FROM transactions t LEFT JOIN categories c ON c.id=t.category_id"
+            f" WHERE t.id IN ({qmarks})", ids).fetchall()
+        return {"entries": [_txn_dict(r) for r in rows],
+                "used_ai": res["used_ai"], "source": res["source"]}
+
+    @_safe
+    def undo_txn(self, txn_id: int):
+        with self._lock:
+            db.soft_delete_transaction(self.conn, txn_id)
+        return {}
+
+    @_safe
+    def restore_txn(self, txn_id: int):
+        with self._lock:
+            db.undelete_transaction(self.conn, txn_id)
+        return {}
+
+    @_safe
+    def update_txn(self, txn_id: int, fields: dict):
+        allowed = {"description", "amount_agorot", "category_id",
+                   "effective_date", "payment_method", "needs_review"}
+        clean = {k: v for k, v in fields.items() if k in allowed}
+        with self._lock:
+            old = self.conn.execute(
+                "SELECT * FROM transactions WHERE id=?", (txn_id,)).fetchone()
+            db.update_transaction(self.conn, txn_id, **clean)
+            if ("category_id" in clean and old
+                    and clean["category_id"] != old["category_id"]
+                    and old["description"]):
+                cat = self.conn.execute(
+                    "SELECT is_income FROM categories WHERE id=?",
+                    (clean["category_id"],)).fetchone()
+                if cat and not cat["is_income"]:
+                    key = old["description"].strip().lower().split(" with ")[0]
+                    if key and db.match_rule(self.conn, key) != clean["category_id"]:
+                        db.add_rule(self.conn, key, clean["category_id"],
+                                    created_from_txn=txn_id)
+        return {}
+
+    # --- views -----------------------------------------------------------------
+
+    @_safe
+    def get_overview(self):
+        today = self._today()
+        fp = insights.fact_pack(self.conn, today)
+        return {"safe_to_spend": fp["safe_to_spend"],
+                "categories": fp["categories"], "card": fp["card"],
+                "goals": fp["goals"], "cycle": fp["cycle"],
+                "balance": fp["balance"],
+                "recent": [
+                    _txn_dict(r) for r in db.list_transactions(self.conn, limit=5)]}
+
+    @_safe
+    def list_ledger(self, filters: dict):
+        kw = {}
+        if filters.get("month"):           # "2026-06"
+            y, m = map(int, filters["month"].split("-"))
+            kw["start"] = dt.date(y, m, 1)
+            kw["end"] = (dt.date(y + 1, 1, 1) if m == 12
+                         else dt.date(y, m + 1, 1)) - dt.timedelta(days=1)
+        if filters.get("category_id"):
+            kw["category_id"] = int(filters["category_id"])
+        if filters.get("text"):
+            kw["text"] = filters["text"]
+        if filters.get("needs_review"):
+            kw["needs_review"] = True
+        rows = db.list_transactions(self.conn, limit=500, **kw)
+        return {"rows": [_txn_dict(r) for r in rows],
+                "categories": [dict(c) for c in db.categories(self.conn)]}
+
+    @_safe
+    def get_goals(self):
+        reports = goals_eng.goal_report(self.conn, self._today())
+        for g in reports:
+            g["target_fmt"] = fmt_ils(g["target_agorot"])
+            g["progress_fmt"] = fmt_ils(g["progress_agorot"])
+            if g["pace_needed_agorot"] is not None:
+                g["pace_needed_fmt"] = fmt_ils(g["pace_needed_agorot"])
+            if isinstance(g.get("projected_date"), dt.date):
+                g["projected_date"] = g["projected_date"].isoformat()
+        return {"goals": reports}
+
+    @_safe
+    def save_goal(self, g: dict):
+        with self._lock:
+            name = str(g["name"]).strip()
+            target = to_agorot(g["target_ils"])
+            if not name:
+                raise ValueError("goal name must not be empty")
+            if target <= 0:
+                raise ValueError("goal target must be positive")
+            if g.get("id"):
+                db.update_goal(self.conn, int(g["id"]),
+                               name=name,
+                               target_agorot=target,
+                               target_date=g.get("target_date"))
+            else:
+                db.add_goal(self.conn, name=name,
+                            emoji=g.get("emoji", "🎯"),
+                            type=("save_by_date" if g.get("goal_type") ==
+                                  "save_by_date" else "purchase_fund"),
+                            target_agorot=target,
+                            target_date=(dt.date.fromisoformat(g["target_date"])
+                                         if g.get("target_date") else None))
+        return {}
+
+    @_safe
+    def archive_goal(self, goal_id: int):
+        with self._lock:
+            db.update_goal(self.conn, goal_id, status="archived")
+        return {}
+
+    # --- advisor -----------------------------------------------------------------
+
+    @_safe
+    def get_briefing(self, force: bool = False):
+        with self._lock:
+            return advisor.get_briefing(self.conn, self._today(), force=force)
+
+    @_safe
+    def chat_send(self, text: str):
+        with self._lock:
+            return advisor.chat(self.conn, text, self._today())
+
+    @_safe
+    def chat_apply_action(self, action: dict):
+        with self._lock:
+            return advisor.apply_action(self.conn, action, self._today())
+
+    @_safe
+    def get_chat_history(self):
+        return {"messages": [dict(c) for c in db.recent_chat(self.conn, 50)]}
+
+    # --- settings & onboarding ------------------------------------------------------
+
+    @_safe
+    def get_app_settings(self):
+        return {"settings": db.get_settings(self.conn),
+                "categories": [dict(c) for c in db.categories(self.conn)],
+                "budgets": {str(k): v for k, v in db.get_budgets(self.conn).items()}}
+
+    @_safe
+    def save_settings(self, settings: dict):
+        with self._lock:
+            for k, v in settings.items():
+                if v is None:
+                    continue
+                db.set_setting(self.conn, k, v)
+        return {}
+
+    @_safe
+    def set_category_budget(self, category_id: int, amount_ils):
+        with self._lock:
+            amount = to_agorot(amount_ils)
+            if amount <= 0:
+                raise ValueError("budget must be positive")
+            db.set_budget(self.conn, int(category_id), amount)
+        return {}
+
+    @_safe
+    def onboarding_braindump(self, text: str):
+        return {"proposal": advisor.onboarding_propose(self.conn, text,
+                                                       self._today())}
+
+    @_safe
+    def onboarding_complete(self, profile: dict, proposal: dict):
+        from app.models import ParsedTxn
+        # Validate everything BEFORE any write — db helpers autocommit, so
+        # failing early is the only way to keep onboarding all-or-nothing.
+        profile_clean = {}
+        for k in ONBOARD_KEYS:
+            if k not in profile:
+                continue
+            v = str(profile[k]).strip()
+            if k in ("salary_day", "card_charge_day"):
+                if not v.isdigit() or not 1 <= int(v) <= 31:
+                    raise ValueError(f"{k} must be an integer 1..31")
+                v = str(int(v))
+            elif k == "salary_amount_agorot":
+                if not v.isdigit() or int(v) <= 0:
+                    raise ValueError("salary_amount_agorot must be a positive"
+                                     " integer (agorot = shekels x 100)")
+                v = str(int(v))
+            profile_clean[k] = v
+        ob_agorot = to_agorot(proposal.get("opening_balance_ils") or 0)
+        txns = [ParsedTxn(**t) for t in proposal.get("transactions", [])]
+        budgets = []
+        for name, ils in (proposal.get("suggested_budgets") or {}).items():
+            cid = db.category_id_by_name(self.conn, str(name))
+            try:
+                agorot = to_agorot(ils)
+            except ValueError:
+                continue
+            if cid and agorot > 0:
+                budgets.append((cid, agorot))
+        with self._lock:
+            for k, v in profile_clean.items():
+                db.set_setting(self.conn, k, v)
+            db.set_setting(self.conn, "opening_balance_agorot", ob_agorot)
+            db.set_setting(self.conn, "opening_balance_date",
+                           self._today().isoformat())
+            for p in txns:
+                parser._store(self.conn, p, raw_text="(onboarding)",
+                              source="onboarding")
+            for cid, agorot in budgets:
+                db.set_budget(self.conn, cid, agorot)
+        return {}
+
+    # --- export ----------------------------------------------------------------------
+
+    @_safe
+    def export_csv(self, month: str):
+        y, m = map(int, month.split("-"))
+        start = dt.date(y, m, 1)
+        end = (dt.date(y + 1, 1, 1) if m == 12
+               else dt.date(y, m + 1, 1)) - dt.timedelta(days=1)
+        rows = db.list_transactions(self.conn, start=start, end=end)
+        out_dir = Path(__file__).resolve().parent.parent / "exports"
+        out_dir.mkdir(exist_ok=True)
+        path = out_dir / f"moneypilot-{month}.csv"
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            w.writerow(["date", "amount_ils", "direction", "category",
+                        "description", "people", "method", "source"])
+            for r in rows:
+                w.writerow([r["effective_date"], f"{r['amount_agorot']/100:.2f}",
+                            r["direction"], r["category_name"] or "",
+                            r["description"], r["people"] or "",
+                            r["payment_method"], r["source"]])
+        return {"path": str(path)}
