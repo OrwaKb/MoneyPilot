@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 
-from app.models import ParsedTxn
+from pydantic import ValidationError
+
+from app import db
+from app.ai import client, prompts
+from app.engine import fx
+from app.models import ParsedTxn, to_agorot
 
 # --- offline fallback parser --------------------------------------------------
 
@@ -75,3 +81,141 @@ def fallback_parse(text: str, today: dt.date) -> list[ParsedTxn]:
     if not out:
         raise ValueError("no amount found in text")
     return out
+
+
+# --- AI parse pipeline ----------------------------------------------------------
+
+REVIEW_CONFIDENCE = 0.7
+_FAST_RE = re.compile(r"^\s*(\d+(?:[.,]\d{1,2})?)\s+([^\d].*)$")
+
+
+def _fast_path(conn, text: str, today: dt.date) -> ParsedTxn | None:
+    """'<amount> <words>' where a learned rule matches the words → no AI call."""
+    if "\n" in text.strip():
+        return None
+    m = _FAST_RE.match(text)
+    if not m:
+        return None
+    cat_id = db.match_rule(conn, m.group(2))
+    if cat_id is None:
+        return None
+    cat = conn.execute("SELECT name FROM categories WHERE id=?",
+                       (cat_id,)).fetchone()["name"]
+    return ParsedTxn(effective_date=today,
+                     amount=float(m.group(1).replace(",", ".")),
+                     category=cat, description=m.group(2).strip(),
+                     confidence=1.0)
+
+
+def _build_prompt(conn, text: str, today: dt.date) -> tuple[str, str]:
+    cats = ", ".join(c["name"] for c in db.categories(conn))
+    rules = "; ".join(f"{r['pattern']} -> {r['category_name']}"
+                      for r in db.list_rules(conn)) or "none"
+    goal_names = ", ".join(g["name"] for g in db.list_goals(conn)) or "none"
+    salary = int(db.get_setting(conn, "salary_amount_agorot", "0")) // 100
+    user = prompts.PARSE_USER_TMPL.format(
+        today=today.isoformat(), weekday=today.strftime("%A"),
+        categories=cats, rules=rules, goals=goal_names, salary=salary, text=text)
+    return prompts.PARSE_SYSTEM, user
+
+
+def _ai_parse(conn, text: str, today: dt.date) -> list[ParsedTxn]:
+    system, user = _build_prompt(conn, text, today)
+    reply = client.ask_claude(user, system=system, timeout_s=60)
+    for attempt in range(2):
+        try:
+            items = client.extract_json(reply)
+            return [ParsedTxn(**item) for item in items]
+        except (ValueError, ValidationError, TypeError) as e:
+            if attempt == 1:
+                raise
+            reply = client.ask_claude(
+                prompts.REPAIR_TMPL.format(error=str(e)[:300], previous=reply[:2000]),
+                system=system, timeout_s=60)
+    raise client.AIUnavailable("unreachable")  # pragma: no cover
+
+
+def _store(conn, p: ParsedTxn, *, raw_text: str, source: str) -> int:
+    try:
+        rates = fx.get_rates(conn, p.effective_date) if p.currency != "ILS" else {}
+        agorot, rate = fx.to_ils(p.amount, p.currency, rates)
+    except ValueError:
+        # No rate for this currency (offline + exotic): store the raw amount
+        # as ILS-magnitude and flag for review — entries are never lost.
+        agorot, rate = to_agorot(p.amount), None
+        p = p.model_copy(update={
+            "description": f"{p.description} [unconverted {p.amount} {p.currency}]",
+            "confidence": 0.0})
+    needs_review = 1 if (source == "fallback"
+                         or p.confidence < REVIEW_CONFIDENCE) else 0
+    cat_id = db.category_id_by_name(conn, p.category)
+    if cat_id is None:
+        fallback_cat = "Other income" if p.direction == "income" else "Other"
+        cat_id = db.category_id_by_name(conn, fallback_cat)
+        needs_review = 1
+    goal_id = None
+    if p.direction == "goal_contribution":
+        g = db.get_goal_by_name(conn, p.goal_name or p.description)
+        if g is None:
+            needs_review = 1
+        else:
+            goal_id = g["id"]
+    signed = agorot if p.direction == "income" else -agorot
+    return db.add_transaction(
+        conn, effective_date=p.effective_date, amount_agorot=signed,
+        direction=p.direction, currency_orig=p.currency,
+        amount_orig=(p.amount if p.currency != "ILS" else None),
+        fx_rate=rate, category_id=cat_id, description=p.description,
+        merchant=p.merchant, people=p.people, payment_method=p.payment_method,
+        goal_id=goal_id, raw_text=raw_text, source=source,
+        ai_confidence=p.confidence, needs_review=needs_review)
+
+
+def parse_and_store(conn, text: str, today: dt.date) -> dict:
+    """Entry point used by the UI. Never raises for AI problems; the only
+    user-visible error is 'I could not find an amount in that'."""
+    fast = _fast_path(conn, text, today)
+    if fast is not None:
+        ids = [_store(conn, fast, raw_text=text, source="rule")]
+        return {"entries": ids, "used_ai": False, "source": "rule"}
+    try:
+        parsed = _ai_parse(conn, text, today)
+        source, used_ai = "ai", True
+    except Exception:
+        parsed = fallback_parse(text, today)  # raises ValueError if no amount
+        source, used_ai = "fallback", False
+    ids = [_store(conn, p, raw_text=text, source=source) for p in parsed]
+    return {"entries": ids, "used_ai": used_ai, "source": source}
+
+
+def resweep(conn, today: dt.date) -> int:
+    """Re-parse fallback-sourced rows once AI is reachable again. Only rows whose
+    raw_text yields exactly one transaction are upgraded in place."""
+    rows = db.list_transactions(conn, needs_review=True)
+    upgraded = 0
+    for row in rows:
+        if row["source"] != "fallback" or not row["raw_text"]:
+            continue
+        try:
+            parsed = _ai_parse(conn, row["raw_text"], today)
+        except Exception:
+            break  # still offline — stop trying
+        if len(parsed) != 1:
+            continue  # ambiguous → leave for manual review
+        p = parsed[0]
+        try:
+            rates = fx.get_rates(conn, p.effective_date) if p.currency != "ILS" else {}
+            agorot, rate = fx.to_ils(p.amount, p.currency, rates)
+        except ValueError:
+            continue  # unconvertible currency → leave in the review queue
+        cat_id = db.category_id_by_name(conn, p.category) or row["category_id"]
+        db.update_transaction(
+            conn, row["id"], effective_date=p.effective_date,
+            amount_agorot=(agorot if p.direction == "income" else -agorot),
+            direction=p.direction, category_id=cat_id, description=p.description,
+            merchant=p.merchant, people=p.people,
+            payment_method=p.payment_method, fx_rate=rate,
+            ai_confidence=p.confidence, source="ai",
+            needs_review=1 if p.confidence < REVIEW_CONFIDENCE else 0)
+        upgraded += 1
+    return upgraded
