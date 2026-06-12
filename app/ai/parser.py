@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 import re
 
 from pydantic import ValidationError
@@ -96,6 +95,9 @@ def _fast_path(conn, text: str, today: dt.date) -> ParsedTxn | None:
     m = _FAST_RE.match(text)
     if not m:
         return None
+    if re.search(r"\b(yesterday|monday|tuesday|wednesday|thursday|friday"
+                 r"|saturday|sunday)\b", text, re.IGNORECASE):
+        return None  # relative dates need the AI path
     cat_id = db.match_rule(conn, m.group(2))
     if cat_id is None:
         return None
@@ -223,16 +225,29 @@ def resweep(conn, today: dt.date) -> int:
             continue  # unconvertible currency → leave in the review queue
         if agorot == 0:
             continue  # sub-agora — leave in the review queue
-        cat_id = db.category_id_by_name(conn, p.category) or row["category_id"]
+        needs_review = 1 if p.confidence < REVIEW_CONFIDENCE else 0
+        goal_id = row["goal_id"]
+        if p.direction == "goal_contribution":
+            g = db.get_goal_by_name(conn, p.goal_name or p.description)
+            if g is None:
+                goal_id = None
+                needs_review = 1  # unresolved goal: keep it in the queue
+            else:
+                goal_id = g["id"]
+        cat_id = db.category_id_by_name(conn, p.category)
+        if cat_id is None:
+            cat_id = row["category_id"]
+            needs_review = 1  # unknown category: keep it in the queue
         db.update_transaction(
             conn, row["id"], effective_date=p.effective_date,
             amount_agorot=(agorot if p.direction == "income" else -agorot),
-            direction=p.direction, category_id=cat_id, description=p.description,
+            direction=p.direction, category_id=cat_id, goal_id=goal_id,
+            description=p.description,
             merchant=p.merchant, people=p.people,
             payment_method=p.payment_method, fx_rate=rate,
             currency_orig=p.currency,
             amount_orig=(p.amount if p.currency != "ILS" else None),
             ai_confidence=p.confidence, source="ai",
-            needs_review=1 if p.confidence < REVIEW_CONFIDENCE else 0)
+            needs_review=needs_review)
         upgraded += 1
     return upgraded

@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import json
 import socket
-import sys
 import threading
 from pathlib import Path
 
@@ -98,11 +97,32 @@ def main() -> None:
     api = Api(db_path, backup_dir=PROJECT_DIR / "backups")
     _serve_singleton(ddir, api)
 
+    s = db.get_settings(api.conn)
+
+    def _geo(key, default):
+        v = s.get(key)
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
     window = webview.create_window(
         "MoneyPilot", str(PROJECT_DIR / "app" / "ui" / "index.html"),
-        js_api=api, width=1180, height=760, min_size=(960, 640),
-        background_color="#0d1117")
+        js_api=api, width=_geo("window_w", 1180), height=_geo("window_h", 760),
+        x=_geo("window_x", None) if "window_x" in s else None,
+        y=_geo("window_y", None) if "window_y" in s else None,
+        min_size=(960, 640), background_color="#0d1117")
     api._window = window
+
+    def _save_geometry():
+        try:
+            for k, v in (("window_w", window.width), ("window_h", window.height),
+                         ("window_x", window.x), ("window_y", window.y)):
+                db.set_setting(api.conn, k, int(v))
+        except Exception:
+            pass  # geometry is a nicety; never block shutdown
+
+    window.events.closing += _save_geometry
     webview.start(debug=args.dev)
     (ddir / SINGLETON_PORT_FILE).unlink(missing_ok=True)
 

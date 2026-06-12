@@ -174,3 +174,47 @@ def test_fast_path_skips_income_categories(seeded, monkeypatch):
     parser.parse_and_store(seeded, "9000 salary landed", TODAY)
     row = db.list_transactions(seeded)[0]
     assert row["direction"] == "income" and row["amount_agorot"] > 0
+
+
+def test_resweep_resolves_goal_link(seeded, monkeypatch):
+    gid = db.add_goal(seeded, name="Drone", type="purchase_fund",
+                      target_agorot=450000)
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            client.AIUnavailable("offline")))
+    parser.parse_and_store(seeded, "500 put into drone fund", TODAY)
+    reply = json.dumps([{"effective_date": "2026-06-11", "amount": 500,
+                         "currency": "ILS", "direction": "goal_contribution",
+                         "category": "Other", "description": "drone fund",
+                         "merchant": None, "people": None,
+                         "payment_method": "transfer", "goal_name": "drone",
+                         "confidence": 0.9}])
+    monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: reply)
+    assert parser.resweep(seeded, TODAY) == 1
+    row = db.list_transactions(seeded)[0]
+    assert row["goal_id"] == gid and row["needs_review"] == 0
+
+
+def test_resweep_unresolved_goal_stays_in_review(seeded, monkeypatch):
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            client.AIUnavailable("offline")))
+    parser.parse_and_store(seeded, "500 put into mystery fund", TODAY)
+    reply = json.dumps([{"effective_date": "2026-06-11", "amount": 500,
+                         "currency": "ILS", "direction": "goal_contribution",
+                         "category": "Other", "description": "mystery fund",
+                         "merchant": None, "people": None,
+                         "payment_method": "transfer", "goal_name": "mystery",
+                         "confidence": 0.9}])
+    monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: reply)
+    parser.resweep(seeded, TODAY)
+    row = db.list_transactions(seeded)[0]
+    assert row["goal_id"] is None and row["needs_review"] == 1
+
+
+def test_fast_path_bails_on_date_words(seeded, monkeypatch):
+    food = db.category_id_by_name(seeded, "Food out")
+    db.add_rule(seeded, "falafel", food)
+    monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: GOOD_REPLY)
+    res = parser.parse_and_store(seeded, "45 falafel yesterday", TODAY)
+    assert res["used_ai"] is True  # rule exists but date word forces AI path

@@ -22,9 +22,16 @@ async function refreshAll() {
   for (const fn of Object.values(renderers)) await fn();
 }
 
-function toast(msg) {
+function toast(msg, action) {            // action: {label, fn} optional
   const t = $("#toast");
   t.textContent = msg;
+  if (action) {
+    const b = document.createElement("button");
+    b.className = "toast-btn";
+    b.textContent = action.label;
+    b.onclick = () => { action.fn(); t.remove(); };
+    t.appendChild(b);
+  }
   t.classList.remove("hidden");
   clearTimeout(toast._h);
   toast._h = setTimeout(() => t.classList.add("hidden"), 5000);
@@ -60,7 +67,8 @@ function addUndo(chip, txnId) {
   const b = document.createElement("button");
   b.textContent = "undo";
   b.onclick = async () => {
-    await api("undo_txn", txnId);
+    const r = await api("undo_txn", txnId);
+    if (!r.ok) { toast(r.error); return; }
     chip.remove();
     refreshAll();
   };
@@ -226,7 +234,9 @@ function lgEditRow(tr) {
     <td><button class="rowbtn" data-act="save">✔</button></td>`;
   tr.querySelector("[data-act=save]").onclick = async () => {
     const [d, a, c, t] = tr.querySelectorAll("input, select");
+    if (!d.value) { toast("date required"); return; }
     const ils = parseFloat(a.value);
+    if (!Number.isFinite(ils)) { toast("amount must be a number"); return; }
     const res = await api("update_txn", id, {
       effective_date: d.value,
       amount_agorot: Math.round(ils * 100),   // sign as displayed (− = expense)
@@ -246,8 +256,13 @@ $("#lg-body").addEventListener("click", async (e) => {
   const tr = btn.closest("tr");
   const id = Number(tr.dataset.id);
   if (btn.dataset.act === "del") {
-    await api("undo_txn", id);
-    toast("deleted (soft) — restore from a fresh entry chip or DB if needed");
+    const r = await api("undo_txn", id);
+    if (!r.ok) { toast(r.error); return; }
+    toast("Deleted.", { label: "UNDO", fn: async () => {
+      const rr = await api("restore_txn", id);
+      if (!rr.ok) { toast(rr.error); return; }
+      refreshAll();
+    }});
     refreshAll();
   } else if (btn.dataset.act === "edit") {
     lgEditRow(tr);
@@ -258,8 +273,9 @@ for (const id of ["lg-month", "lg-cat", "lg-text", "lg-review"])
   $("#" + id).addEventListener("change", () => renderers.ledger());
 
 $("#lg-export").addEventListener("click", async () => {
+  const now = new Date();
   const month = $("#lg-month").value ||
-    new Date().toISOString().slice(0, 7);
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const res = await api("export_csv", month);
   toast(res.ok ? "exported: " + res.path : res.error);
 });
@@ -290,7 +306,8 @@ renderers.goals = async function renderGoals() {
 $("#gl-cards").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-act=arch]");
   if (!btn) return;
-  await api("archive_goal", Number(btn.closest(".goalcard").dataset.id));
+  const r = await api("archive_goal", Number(btn.closest(".goalcard").dataset.id));
+  if (!r.ok) { toast(r.error); return; }
   refreshAll();
 });
 

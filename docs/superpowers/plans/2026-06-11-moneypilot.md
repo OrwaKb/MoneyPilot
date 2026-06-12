@@ -194,6 +194,19 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > edit dialogs, always send the goal's existing `target_date` back (omitting
 > it clears the date).
 
+> **Amendments (final whole-branch review):** `resweep` mirrors `_store`'s
+> goal/category resolution (offline goal contributions were upgraded with
+> `goal_id=NULL` and silently never reached their goal). Window size/position
+> persisted via settings (spec §10). Ledger deletes get an UNDO toast wired to
+> `restore_txn` (spec §7/§8). Fast path bails on relative-date words. Ledger
+> edit guards empty date / NaN amount; chip-undo and goal-archive check
+> `res.ok`; CSV month default uses local time. **Recorded v1 deferrals**
+> (spec-promised, consciously shipped without): onboarding fixed-bills wizard
+> step (Bills budget comes from the AI proposal), advisor briefing-history UI,
+> entry-chip Edit button, recent-ticker undo, configurable default payment
+> method, manual FX-rate override (also noted at Task 9), onboarding Back
+> button.
+
 ---
 
 ### Task 1: Project scaffolding & test harness
