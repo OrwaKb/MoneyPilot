@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MoneyPilot</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="onboarding" class="overlay hidden">
+  <div class="ob-card">
+    <h1>▮ MONEYPILOT // FIRST FLIGHT</h1>
+    <div id="ob-steps">
+      <div class="ob-step" data-step="0">
+        <label>What's your name?</label>
+        <input id="ob-name" class="ob-input" placeholder="Orwa">
+      </div>
+      <div class="ob-step hidden" data-step="1">
+        <label>Monthly salary (₪) and the day it lands</label>
+        <input id="ob-salary" class="ob-input" type="number" placeholder="9000">
+        <input id="ob-salary-day" class="ob-input" type="number" min="1" max="31"
+               placeholder="day it lands, e.g. 10">
+      </div>
+      <div class="ob-step hidden" data-step="2">
+        <label>Credit-card charge day of month</label>
+        <input id="ob-card-day" class="ob-input" type="number" min="1" max="31"
+               placeholder="e.g. 2">
+      </div>
+      <div class="ob-step hidden" data-step="3">
+        <label>The brain-dump: what do you have right now, and what have you
+               spent this month so far? Your own words.</label>
+        <textarea id="ob-dump" class="ob-input" rows="6"
+          placeholder="I have about 5000 in the bank. This month: rent 2500, ~700 groceries, 300 eating out…"></textarea>
+      </div>
+      <div class="ob-step hidden" data-step="4">
+        <label>Proposal — edit anything, then confirm</label>
+        <div id="ob-proposal" class="ob-proposal"></div>
+      </div>
+    </div>
+    <div class="ob-nav">
+      <span id="ob-status" class="sub"></span>
+      <button id="ob-next" class="btn primary">NEXT ▸</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <span class="logo">▮ MONEYPILOT</span>
+  <span id="cycle-info" class="cycle-info"></span>
+</header>
+
+<div id="entrybar">
+  <input id="entry-input" autocomplete="off"
+   placeholder='log it…  e.g. "45 falafel with karim" · "salary landed" · "put 500 in drone fund"'>
+  <div id="chips"></div>
+</div>
+
+<nav id="tabs">
+  <button class="tab active" data-tab="overview">OVERVIEW</button>
+  <button class="tab" data-tab="ledger">LEDGER</button>
+  <button class="tab" data-tab="goals">GOALS</button>
+  <button class="tab" data-tab="advisor">ADVISOR</button>
+</nav>
+
+<main>
+  <section id="tab-overview" class="tabpane">
+    <div class="grid-ov">
+      <div class="panel hero">
+        <div class="label">SAFE TO SPEND TODAY</div>
+        <div id="ov-sts" class="hero-num">—</div>
+        <div id="ov-sts-sub" class="sub"></div>
+        <div class="gaugewrap"><div id="ov-gauge" class="gauge"></div></div>
+        <div id="ov-cycle-sub" class="sub"></div>
+      </div>
+      <div class="panel">
+        <div class="label">CATEGORIES // THIS CYCLE</div>
+        <div id="ov-cats"></div>
+      </div>
+      <div class="panel">
+        <div class="label">UPCOMING CARD CHARGE</div>
+        <div id="ov-card" class="big-num">—</div>
+        <div id="ov-card-sub" class="sub"></div>
+        <div class="label" style="margin-top:14px">BALANCE</div>
+        <div id="ov-balance" class="sub"></div>
+      </div>
+      <div class="panel wide">
+        <div class="label">BRIEFING
+          <button id="ov-brief-refresh" class="mini-btn" title="refresh">↻</button>
+        </div>
+        <div id="ov-briefing" class="briefing">…</div>
+      </div>
+      <div class="panel">
+        <div class="label">GOALS</div>
+        <div id="ov-goals"></div>
+      </div>
+      <div class="panel wide">
+        <div class="label">RECENT</div>
+        <div id="ov-recent"></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-ledger" class="tabpane hidden">
+    <div class="filters">
+      <input id="lg-month" type="month">
+      <select id="lg-cat"><option value="">all categories</option></select>
+      <input id="lg-text" placeholder="search…">
+      <label class="chk"><input id="lg-review" type="checkbox"> needs review</label>
+      <button id="lg-export" class="btn">EXPORT CSV</button>
+    </div>
+    <table id="lg-table">
+      <thead><tr><th>date</th><th>amount</th><th>category</th>
+        <th>description</th><th>method</th><th></th></tr></thead>
+      <tbody id="lg-body"></tbody>
+    </table>
+  </section>
+
+  <section id="tab-goals" class="tabpane hidden">
+    <div id="gl-cards" class="goal-grid"></div>
+    <div class="panel add-goal">
+      <div class="label">NEW GOAL</div>
+      <input id="gl-name" placeholder="name, e.g. Drone">
+      <select id="gl-type">
+        <option value="purchase_fund">purchase fund</option>
+        <option value="save_by_date">save by date</option>
+      </select>
+      <input id="gl-target" type="number" placeholder="target ₪">
+      <input id="gl-date" type="date">
+      <button id="gl-save" class="btn primary">CREATE</button>
+    </div>
+  </section>
+
+  <section id="tab-advisor" class="tabpane hidden">
+    <div id="ch-thread" class="chat-thread"></div>
+    <div class="chat-inputrow">
+      <input id="ch-input" placeholder="ask anything about your money…">
+      <button id="ch-send" class="btn primary">SEND</button>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast hidden"></div>
+<script src="app.js"></script>
+</body>
+</html>
