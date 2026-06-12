@@ -3,7 +3,14 @@
 "use strict";
 
 const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
 const ready = new Promise((res) => window.addEventListener("pywebviewready", res));
+
+// Fix 4: module-level store for pending advisor action card
+let pendingActionEl = null;
+
+// Fix 5: module-level briefing cache
+let briefingText = null;
 
 async function api(method, ...args) {
   await ready;
@@ -152,14 +159,21 @@ renderers.overview = async function renderOverview() {
      <span class="${r.amount_agorot < 0 ? "neg" : "pos"}">${
       esc(r.amount_fmt)}</span></div>`).join("");
 
-  const b = await api("get_briefing", false);
-  $("#ov-briefing").textContent = b.ok ? b.text : "briefing unavailable";
+  // Fix 5: only fetch briefing when cache is empty; render from cache otherwise
+  if (briefingText === null) {
+    const b = await api("get_briefing", false);
+    briefingText = b.ok ? b.text : null;
+  }
+  $("#ov-briefing").textContent = briefingText ?? "briefing unavailable";
 };
 
 $("#ov-brief-refresh").addEventListener("click", async () => {
   $("#ov-briefing").textContent = "…";
+  // Fix 5: force-refresh clears the cache then re-fetches
+  briefingText = null;
   const b = await api("get_briefing", true);
-  $("#ov-briefing").textContent = b.ok ? b.text : "briefing unavailable";
+  briefingText = b.ok ? b.text : null;
+  $("#ov-briefing").textContent = briefingText ?? "briefing unavailable";
 });
 
 /* --- LEDGER ---------------------------------------------------------------- */
@@ -180,8 +194,9 @@ renderers.ledger = async function renderLedger() {
   if (catSel.options.length === 1)
     for (const c of res.categories)
       catSel.add(new Option(`${c.emoji} ${c.name}`, c.id));
+  // Fix 2: expose category_id on the row so lgEditRow can preselect it
   $("#lg-body").innerHTML = res.rows.map((r) => `
-    <tr data-id="${r.id}" class="${r.needs_review ? "review" : ""}">
+    <tr data-id="${r.id}" data-cat-id="${r.category_id ?? ''}" class="${r.needs_review ? "review" : ""}">
       <td>${esc(r.effective_date)}</td>
       <td>${esc(r.amount_fmt)}</td>
       <td>${esc(r.category_emoji ?? "")} ${esc(r.category_name ?? "")}</td>
@@ -198,8 +213,10 @@ function lgEditRow(tr) {
   const cur = { date: cells[0].textContent,
                 amount: cells[1].textContent.replace(/[₪,]/g, ""),
                 desc: cells[3].textContent.split(" · ")[0] };
+  // Fix 2: read the row's current category so the select is preselected
+  const curCat = tr.dataset.catId;
   const catOpts = lgCategories.map((c) =>
-    `<option value="${c.id}">${esc(c.emoji)} ${esc(c.name)}</option>`).join("");
+    `<option value="${c.id}" ${String(c.id) === curCat ? "selected" : ""}>${esc(c.emoji)} ${esc(c.name)}</option>`).join("");
   tr.innerHTML = `
     <td><input type="date" value="${esc(cur.date)}"></td>
     <td><input type="number" step="0.01" value="${esc(cur.amount)}"></td>
@@ -309,9 +326,16 @@ function chatActionCard(action) {
   btn.onclick = async () => {
     const res = await api("chat_apply_action", action);
     toast(res.ok ? res.summary : res.error);
-    if (res.ok) { div.remove(); refreshAll(); }
+    if (res.ok) {
+      // Fix 4: clear the pending card reference when it is applied
+      pendingActionEl = null;
+      div.remove();
+      refreshAll();
+    }
   };
   div.appendChild(btn);
+  // Fix 4: store a reference so refreshAll can re-attach it
+  pendingActionEl = div;
   $("#ch-thread").appendChild(div);
   $("#ch-thread").scrollTop = $("#ch-thread").scrollHeight;
 }
@@ -319,8 +343,11 @@ function chatActionCard(action) {
 renderers.advisor = async function renderAdvisor() {
   const res = await api("get_chat_history");
   if (!res.ok) return;
-  $("#ch-thread").innerHTML = "";
+  const thread = $("#ch-thread");
+  thread.innerHTML = "";
   for (const m of res.messages) chatBubble(m.role, m.text);
+  // Fix 4: re-attach the pending action card after rebuilding the thread
+  if (pendingActionEl) thread.appendChild(pendingActionEl);
 };
 
 async function chatSend() {
@@ -357,16 +384,19 @@ window.startOnboarding = function startOnboarding() {
 
   function renderProposal(p) {
     const rows = [
+      // Fix 1: coerce to Number so an LLM-produced string cannot break out of the attribute
       `<div class="prow">opening balance ₪
-        <input id="obp-balance" value="${p.opening_balance_ils ?? 0}"></div>`,
+        <input id="obp-balance" value="${Number(p.opening_balance_ils) || 0}"></div>`,
       `<div class="prow"><b>month so far:</b></div>`,
       ...(p.transactions || []).map((t, i) =>
+        // Fix 1: coerce t.amount
         `<div class="prow">${esc(t.effective_date)} · ${esc(t.category)} ·
-          ${esc(t.description)} ₪<input data-pi="${i}" value="${t.amount}"></div>`),
+          ${esc(t.description)} ₪<input data-pi="${i}" value="${Number(t.amount) || 0}"></div>`),
       `<div class="prow"><b>suggested budgets (₪/mo):</b></div>`,
       ...Object.entries(p.suggested_budgets || {}).map(([name, ils]) =>
+        // Fix 1: coerce ils
         `<div class="prow">${esc(name)} ₪
-          <input data-pb="${esc(name)}" value="${ils}"></div>`),
+          <input data-pb="${esc(name)}" value="${Number(ils) || 0}"></div>`),
     ];
     $("#ob-proposal").innerHTML = rows.join("");
   }
@@ -390,24 +420,27 @@ window.startOnboarding = function startOnboarding() {
       return;
     }
     // step 4 → confirm
-    proposal.opening_balance_ils = parseFloat($("#obp-balance").value) || 0;
-    document.querySelectorAll("[data-pi]").forEach((inp) => {
-      proposal.transactions[Number(inp.dataset.pi)].amount =
-        parseFloat(inp.value) || 0;
+    // Fix 3: build fresh copies each attempt so proposal is never mutated;
+    // a server-side failure followed by a retry no longer crashes.
+    const opening = parseFloat($("#obp-balance").value) || 0;
+    const txns = [];
+    $$("#ob-proposal [data-pi]").forEach((inp) => {
+      const t = { ...proposal.transactions[Number(inp.dataset.pi)] };
+      t.amount = parseFloat(inp.value) || 0;
+      if (t.amount > 0) txns.push(t);
     });
-    proposal.transactions = proposal.transactions.filter((t) => t.amount > 0);
     const budgets = {};
-    document.querySelectorAll("[data-pb]").forEach((inp) => {
+    $$("#ob-proposal [data-pb]").forEach((inp) => {
       budgets[inp.dataset.pb] = parseFloat(inp.value) || 0;
     });
-    proposal.suggested_budgets = budgets;
     const res = await api("onboarding_complete", {
       user_name: $("#ob-name").value.trim(),
       salary_day: $("#ob-salary-day").value || "1",
       salary_amount_agorot: String(
         Math.round((parseFloat($("#ob-salary").value) || 0) * 100)),
       card_charge_day: $("#ob-card-day").value || "1",
-    }, proposal);
+    }, { ...proposal, opening_balance_ils: opening,
+         transactions: txns, suggested_budgets: budgets });
     if (!res.ok) { toast(res.error); return; }
     $("#onboarding").classList.add("hidden");
     await refreshAll();
