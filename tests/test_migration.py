@@ -80,3 +80,40 @@ def test_migration_no_chats_no_conversation(tmp_path):
     v = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
     assert v["value"] == "2"
     c.close()
+
+
+def test_import_accepts_v1_backup_and_adopts_chats(conn):
+    data = db.export_json(conn)
+    data["schema_version"] = 1
+    data.pop("conversations", None)
+    data["chat_history"] = [
+        {"id": 1, "ts": "2026-06-01T10:00:00", "role": "user", "text": "old q",
+         "conversation_id": None},
+        {"id": 2, "ts": "2026-06-01T10:00:05", "role": "assistant", "text": "old a",
+         "conversation_id": None},
+    ]
+    db.import_json(conn, data)
+    convs = db.list_conversations(conn)
+    assert len(convs) == 1 and convs[0]["title"] == "Earlier conversation"
+    msgs = db.recent_chat(conn, 10, convs[0]["id"])
+    assert [m["text"] for m in msgs] == ["old q", "old a"]
+
+
+def test_import_rejects_future_schema(conn):
+    import pytest
+    data = db.export_json(conn)
+    data["schema_version"] = 99
+    with pytest.raises(ValueError):
+        db.import_json(conn, data)
+
+
+def test_adopt_orphans_is_idempotent(conn):
+    # Insert a NULL-conversation_id row directly (simulating a legacy writer)
+    conn.execute(
+        "INSERT INTO chat_history(ts, role, text, conversation_id)"
+        " VALUES('2026-06-01T10:00:00', 'user', 'hi', NULL)")
+    conn.commit()
+    db._adopt_orphan_chats(conn)
+    db._adopt_orphan_chats(conn)
+    convs = db.list_conversations(conn)
+    assert len(convs) == 1

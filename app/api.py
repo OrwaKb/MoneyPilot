@@ -200,6 +200,7 @@ class Api:
 
     @_safe
     def chat_send(self, text: str, conversation_id=None):
+        conversation_id = int(conversation_id) if conversation_id is not None else None
         with self._lock:
             return advisor.chat(self.conn, text, self._today(),
                                 conversation_id=conversation_id)

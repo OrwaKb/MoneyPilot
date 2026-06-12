@@ -9,8 +9,11 @@ const ready = new Promise((res) => window.addEventListener("pywebviewready", res
 // Fix 4: module-level store for pending advisor action card
 let pendingActionEl = null;
 
-// active advisor conversation; null = fresh chat, not yet created in the DB
-let currentChatId = null;
+// active advisor conversation
+// undefined = unset (default to most-recent on first render)
+// null      = deliberately fresh (new-chat sentinel)
+// number    = a specific conversation id
+let currentChatId;
 
 // Fix 5: module-level briefing cache
 let briefingText = null;
@@ -425,8 +428,10 @@ function armDelete(btn, id) {
 async function deleteChat(id) {
   const res = await api("delete_chat", id);
   if (!res.ok) { toast(res.error); return; }
-  if (id === currentChatId) currentChatId = null;
-  pendingActionEl = null;
+  if (id === currentChatId) {
+    currentChatId = undefined;  // fall back to most-recent on next render
+    pendingActionEl = null;     // pending card belongs to the deleted conversation
+  }
   renderers.advisor();
 }
 
@@ -434,14 +439,14 @@ renderers.advisor = async function renderAdvisor() {
   const listRes = await api("list_chats");
   if (!listRes.ok) { toast(listRes.error); return; }
   const chats = listRes.chats || [];
-  // default to the most recent chat when none is selected yet
-  if (currentChatId === null && chats.length)
+  // default to the most recent chat only on the very first render (undefined)
+  if (currentChatId === undefined && chats.length)
     currentChatId = Number(chats[0].id);
   renderChatList(chats);
 
   const thread = $("#ch-thread");
   thread.innerHTML = "";
-  if (currentChatId !== null) {
+  if (Number.isInteger(currentChatId)) {
     const res = await api("get_chat_history", currentChatId);
     if (!res.ok) { toast(res.error); return; }
     for (const m of res.messages) chatBubble(m.role, m.text);
@@ -464,14 +469,23 @@ async function chatSend() {
   if (!res.ok) { toast(res.error); return; }
   // adopt the conversation the backend created/continued so the sidebar tracks it
   if (res.conversation_id != null) currentChatId = Number(res.conversation_id);
-  chatBubble("assistant", res.text);
-  if (res.offline) toast("advisor offline — numbers on Overview are still live");
-  if (res.action) chatActionCard(res.action);
-  renderers.advisor();  // refresh sidebar order/title
+  if (res.offline) {
+    // offline: sidebar refresh only — don't rebuild thread (bubble would vanish)
+    toast("advisor offline — numbers on Overview are still live");
+    chatBubble("assistant", res.text);
+    if (res.action) chatActionCard(res.action);
+    // refresh sidebar title/order without touching the thread
+    const listRes = await api("list_chats");
+    if (listRes.ok) renderChatList(listRes.chats || []);
+  } else {
+    chatBubble("assistant", res.text);
+    if (res.action) chatActionCard(res.action);
+    renderers.advisor();  // refresh sidebar order/title (thread rebuilt from DB)
+  }
 }
 
 $("#ch-new").addEventListener("click", () => {
-  currentChatId = null;
+  currentChatId = null;   // null = deliberately fresh (sentinel)
   pendingActionEl = null;
   renderers.advisor();
 });

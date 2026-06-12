@@ -85,6 +85,23 @@ def init_db(conn: sqlite3.Connection) -> None:
     _migrate(conn)
 
 
+def _adopt_orphan_chats(conn) -> None:
+    """Attach chat rows with no conversation (pre-v2 backups, legacy writers)
+    to an 'Earlier conversation'. Idempotent: only touches NULL rows."""
+    row = conn.execute("SELECT MIN(ts) AS t FROM chat_history"
+                       " WHERE conversation_id IS NULL").fetchone()
+    if row["t"] is None:
+        return
+    cid = conn.execute(
+        "SELECT id FROM conversations WHERE title='Earlier conversation'"
+    ).fetchone()
+    cid = cid["id"] if cid else conn.execute(
+        "INSERT INTO conversations(title, created_at)"
+        " VALUES('Earlier conversation', ?)", (row["t"],)).lastrowid
+    conn.execute("UPDATE chat_history SET conversation_id=?"
+                 " WHERE conversation_id IS NULL", (cid,))
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """Bring an existing DB up to SCHEMA_VERSION. Fresh DBs are stamped at the
     current version by init_db, so each block here is a no-op for them."""
@@ -100,14 +117,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE chat_history ADD COLUMN"
                          " conversation_id INTEGER REFERENCES conversations(id)")
         # adopt any orphaned legacy messages into one 'Earlier conversation'
-        oldest = conn.execute(
-            "SELECT MIN(ts) AS ts, COUNT(*) AS n FROM chat_history").fetchone()
-        if oldest["n"]:
-            cur = conn.execute(
-                "INSERT INTO conversations(title, created_at) VALUES(?,?)",
-                ("Earlier conversation", oldest["ts"]))
-            conn.execute("UPDATE chat_history SET conversation_id=?",
-                         (cur.lastrowid,))
+        _adopt_orphan_chats(conn)
         conn.execute("UPDATE meta SET value='2' WHERE key='schema_version'")
         conn.commit()
 
@@ -385,7 +395,14 @@ def export_json(conn) -> dict:
 
 
 def import_json(conn, data: dict) -> None:
-    if data.get("schema_version") != SCHEMA_VERSION or not data.get("categories"):
+    raw_version = data.get("schema_version")
+    try:
+        schema_version = int(raw_version)
+    except (TypeError, ValueError):
+        schema_version = None
+    if schema_version is None or not (1 <= schema_version <= SCHEMA_VERSION):
+        raise ValueError("not a MoneyPilot backup (or schema version mismatch)")
+    if not data.get("categories"):
         raise ValueError("not a MoneyPilot backup (or schema version mismatch)")
     with conn:  # single transaction
         for t in reversed(_EXPORT_TABLES):
@@ -399,6 +416,8 @@ def import_json(conn, data: dict) -> None:
                 f"INSERT INTO {t}({','.join(cols)})"
                 f" VALUES({','.join('?'*len(cols))})",
                 [tuple(r[c] for c in cols) for r in rows])
+        # adopt orphan chat rows from pre-v2 backups (idempotent)
+        _adopt_orphan_chats(conn)
     conn.commit()
 
 
