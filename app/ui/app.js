@@ -43,6 +43,19 @@ function esc(s) {
               "'": "&#39;" }[c]));
 }
 
+// dim gauge glyph + one quiet line, for zero-row renders (presentational)
+function emptyState(msg) {
+  return `<div class="empty-state">
+    <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true">
+      <path d="M6.34 18.16 A8 8 0 1 1 17.66 18.16" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      <line x1="12" y1="12.5" x2="15.57" y2="7.93" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round"/>
+      <circle cx="12" cy="12.5" r="1.5" fill="currentColor"/>
+    </svg>
+    <span>${esc(msg)}</span></div>`;
+}
+
 /* --- tabs ------------------------------------------------------------- */
 function initTabs() {
   document.querySelectorAll(".tab").forEach((b) =>
@@ -212,7 +225,8 @@ renderers.ledger = async function renderLedger() {
       <td>${esc(r.payment_method)}</td>
       <td><button class="rowbtn" data-act="edit">✎</button>
           <button class="rowbtn" data-act="del">🗑</button></td>
-    </tr>`).join("");
+    </tr>`).join("") ||
+    `<tr><td colspan="6">${emptyState("no entries yet — log one above")}</td></tr>`;
 };
 
 function lgEditRow(tr) {
@@ -287,20 +301,21 @@ renderers.goals = async function renderGoals() {
   $("#gl-cards").innerHTML = res.goals.map((g) => {
     const verdictCls = g.verdict === "ready" ? "ready"
       : g.verdict === "behind" ? "behind" : "";
+    const pct = Math.max(0, Math.min(100, Number(g.pct) || 0));
     const lines = [
       `${g.progress_fmt} / ${g.target_fmt}`,
       g.pace_needed_fmt ? `needs ${g.pace_needed_fmt}/mo` : null,
       g.projected_date ? `projected ${g.projected_date}` : null,
     ].filter(Boolean).join(" · ");
-    return `<div class="panel goalcard" data-id="${g.id}">
+    return `<div class="panel goalcard ${verdictCls}" data-id="${g.id}">
       <div class="meta" style="display:flex;justify-content:space-between">
         <b>${esc(g.emoji)} ${esc(g.name)}</b>
         <button class="rowbtn" data-act="arch" title="archive">✕</button></div>
-      <div class="bar"><div class="fill" style="width:${g.pct}%"></div></div>
+      <div class="ring" style="--p:${pct}"><span class="ring-pct">${pct}%</span></div>
       <div class="sub">${esc(lines)}</div>
-      <div class="sub verdict ${verdictCls}">${esc(g.verdict)} · ${g.pct}%</div>
+      <div class="sub verdict ${verdictCls}">${esc(g.verdict)}</div>
     </div>`;
-  }).join("") || `<span class="sub">no active goals</span>`;
+  }).join("") || emptyState("no active goals — chart one below");
 };
 
 $("#gl-cards").addEventListener("click", async (e) => {
@@ -325,6 +340,8 @@ $("#gl-save").addEventListener("click", async () => {
 
 /* --- ADVISOR -------------------------------------------------------------------- */
 function chatBubble(role, text) {
+  const es = $("#ch-thread .empty-state");
+  if (es) es.remove();
   const div = document.createElement("div");
   div.className = "bubble " + role;
   div.textContent = text;
@@ -365,6 +382,8 @@ renderers.advisor = async function renderAdvisor() {
   for (const m of res.messages) chatBubble(m.role, m.text);
   // Fix 4: re-attach the pending action card after rebuilding the thread
   if (pendingActionEl) thread.appendChild(pendingActionEl);
+  if (!thread.childElementCount)
+    thread.innerHTML = emptyState("no transmissions yet — ask about your money");
 };
 
 async function chatSend() {
