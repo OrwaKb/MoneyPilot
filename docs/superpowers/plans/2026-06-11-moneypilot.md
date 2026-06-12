@@ -152,6 +152,16 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > multi-line fallback rows stay in the review queue by design; the queue is
 > their fix.
 
+> **Amendments (code review, Task 13):** `_store` clamps sub-agora conversions
+> (agorot==0) to 1 agora and flags review — `amount: 0.004` otherwise violated
+> the sign CHECK and crashed the entry. `resweep` re-parses against the row's
+> `created_at` date (a "yesterday" in old raw_text must not re-resolve against
+> sweep day), skips sub-agora rows, and refreshes `currency_orig`/`amount_orig`.
+> `_fast_path` refuses income categories (a learned rule on an income line would
+> have stored salary as negative spending) and zero amounts. **Task 15 note
+> (binding):** the `update_txn` rule-learning path must NOT learn rules from
+> recategorizations onto income categories.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

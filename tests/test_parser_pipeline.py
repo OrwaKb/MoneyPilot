@@ -139,3 +139,38 @@ def test_resweep_skips_unconvertible_rows_without_crashing(seeded, monkeypatch):
     monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: jpy)
     assert parser.resweep(seeded, TODAY) == 0  # skipped, not crashed
     assert db.list_transactions(seeded)[0]["needs_review"] == 1
+
+
+def test_tiny_amount_never_crashes_entry(seeded, monkeypatch):
+    tiny = json.loads(GOOD_REPLY); tiny[0]["amount"] = 0.004
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: json.dumps(tiny))
+    parser.parse_and_store(seeded, "0.004 falafel", TODAY)
+    (row,) = db.list_transactions(seeded)
+    assert row["amount_agorot"] == -1 and row["needs_review"] == 1
+
+def test_resweep_parses_against_entry_date(seeded, monkeypatch):
+    db.add_transaction(seeded, created_at="2026-06-08T12:00:00",
+                       effective_date=dt.date(2026, 6, 7),
+                       amount_agorot=-4500, direction="expense",
+                       category_id=db.category_id_by_name(seeded, "Other"),
+                       description="45 falafel yesterday",
+                       raw_text="45 falafel yesterday",
+                       source="fallback", needs_review=1)
+    seen = {}
+    def fake_ai(conn, text, today):
+        seen["today"] = today
+        raise client.AIUnavailable("stop")
+    monkeypatch.setattr(parser, "_ai_parse", fake_ai)
+    parser.resweep(seeded, TODAY)
+    assert seen["today"] == dt.date(2026, 6, 8)  # entry day, not sweep day
+
+def test_fast_path_skips_income_categories(seeded, monkeypatch):
+    sal = db.category_id_by_name(seeded, "Salary")
+    db.add_rule(seeded, "salary landed", sal)
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            client.AIUnavailable("offline")))
+    parser.parse_and_store(seeded, "9000 salary landed", TODAY)
+    row = db.list_transactions(seeded)[0]
+    assert row["direction"] == "income" and row["amount_agorot"] > 0

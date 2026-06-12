@@ -99,10 +99,16 @@ def _fast_path(conn, text: str, today: dt.date) -> ParsedTxn | None:
     cat_id = db.match_rule(conn, m.group(2))
     if cat_id is None:
         return None
-    cat = conn.execute("SELECT name FROM categories WHERE id=?",
-                       (cat_id,)).fetchone()["name"]
+    cat_row = conn.execute("SELECT name, is_income FROM categories WHERE id=?",
+                           (cat_id,)).fetchone()
+    if cat_row["is_income"]:
+        return None  # income lines always go through the AI/fallback path
+    cat = cat_row["name"]
+    amount = float(m.group(1).replace(",", "."))
+    if amount <= 0:
+        return None
     return ParsedTxn(effective_date=today,
-                     amount=float(m.group(1).replace(",", ".")),
+                     amount=amount,
                      category=cat, description=m.group(2).strip(),
                      confidence=1.0)
 
@@ -146,6 +152,10 @@ def _store(conn, p: ParsedTxn, *, raw_text: str, source: str) -> int:
         p = p.model_copy(update={
             "description": f"{p.description} [unconverted {p.amount} {p.currency}]",
             "confidence": 0.0})
+    if agorot == 0:
+        # sub-agora amount (e.g. 0.004) — store the minimum unit and flag
+        agorot = 1
+        p = p.model_copy(update={"confidence": 0.0})
     needs_review = 1 if (source == "fallback"
                          or p.confidence < REVIEW_CONFIDENCE) else 0
     cat_id = db.category_id_by_name(conn, p.category)
@@ -197,7 +207,8 @@ def resweep(conn, today: dt.date) -> int:
         if row["source"] != "fallback" or not row["raw_text"]:
             continue
         try:
-            parsed = _ai_parse(conn, row["raw_text"], today)
+            entry_day = dt.date.fromisoformat(row["created_at"][:10])
+            parsed = _ai_parse(conn, row["raw_text"], entry_day)
         except Exception:
             break  # still offline — stop trying
         if len(parsed) != 1:
@@ -208,6 +219,8 @@ def resweep(conn, today: dt.date) -> int:
             agorot, rate = fx.to_ils(p.amount, p.currency, rates)
         except ValueError:
             continue  # unconvertible currency → leave in the review queue
+        if agorot == 0:
+            continue  # sub-agora — leave in the review queue
         cat_id = db.category_id_by_name(conn, p.category) or row["category_id"]
         db.update_transaction(
             conn, row["id"], effective_date=p.effective_date,
@@ -215,6 +228,8 @@ def resweep(conn, today: dt.date) -> int:
             direction=p.direction, category_id=cat_id, description=p.description,
             merchant=p.merchant, people=p.people,
             payment_method=p.payment_method, fx_rate=rate,
+            currency_orig=p.currency,
+            amount_orig=(p.amount if p.currency != "ILS" else None),
             ai_confidence=p.confidence, source="ai",
             needs_review=1 if p.confidence < REVIEW_CONFIDENCE else 0)
         upgraded += 1
