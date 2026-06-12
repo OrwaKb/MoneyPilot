@@ -162,6 +162,13 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > (binding):** the `update_txn` rule-learning path must NOT learn rules from
 > recategorizations onto income categories.
 
+> **Amendments (code review, Task 14):** `template_briefing` guards
+> `pace_ratio is not None` (unbudgeted categories crashed the offline briefing
+> with TypeError). `apply_action` validates adjust_setting values per the Task
+> 11 binding note (day keys int 1..31; salary digit-string agorot).
+> `onboarding_propose` clamps today-or-future proposed entries to yesterday per
+> the Task 10 binding note.
+
 ---
 
 ### Task 1: Project scaffolding & test harness
