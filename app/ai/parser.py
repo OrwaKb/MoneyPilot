@@ -26,14 +26,21 @@ CURRENCY_HINTS = {"$": "USD", "dollar": "USD", "usd": "USD",
                   "£": "GBP", "pound": "GBP", "gbp": "GBP"}
 INCOME_HINTS = ["salary", "paycheck", "income", "got paid", "received", "refund"]
 
-_AMOUNT_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
+_AMOUNT_RE = re.compile(r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:[.,]\d{1,2})?)")
 
 
 def _line_to_txn(line: str, today: dt.date) -> ParsedTxn | None:
     m = _AMOUNT_RE.search(line)
     if not m:
         return None
-    amount = float(m.group(1).replace(",", "."))
+    raw = m.group(1)
+    if "," in raw and "." in raw:
+        raw = raw.replace(",", "")     # 1,234.56 — comma as thousands sep
+    elif re.fullmatch(r"\d{1,3}(?:,\d{3})+", raw):
+        raw = raw.replace(",", "")     # 12,345 — thousands only
+    else:
+        raw = raw.replace(",", ".")    # 12,50 — decimal comma
+    amount = float(raw)
     low = line.lower()
     currency = "ILS"
     for hint, cur in CURRENCY_HINTS.items():
@@ -57,12 +64,14 @@ def _line_to_txn(line: str, today: dt.date) -> ParsedTxn | None:
 
 def fallback_parse(text: str, today: dt.date) -> list[ParsedTxn]:
     """Regex-only parse used when Claude is unreachable. Low confidence by design;
-    callers must store results with needs_review=1."""
+    callers must store results with needs_review=1. Raises ValueError if ANY
+    non-empty line has no amount — silently dropping a line would lose an entry."""
     out = []
     for line in filter(None, (ln.strip() for ln in text.splitlines())):
         txn = _line_to_txn(line, today)
-        if txn:
-            out.append(txn)
+        if txn is None:
+            raise ValueError(f"no amount found in: {line!r}")
+        out.append(txn)
     if not out:
         raise ValueError("no amount found in text")
     return out

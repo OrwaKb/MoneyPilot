@@ -143,6 +143,15 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > fallback could use `--system-prompt` (replace) instead of
 > `--append-system-prompt` for exact SDK parity.
 
+> **Amendments (code review, Task 12):** `fallback_parse` raises on ANY
+> non-empty line without an amount (silently dropping a line in a multi-line
+> batch was the one true entry-loss vector — resweep can't recover what was
+> never stored). Thousands separators parse correctly ("1,234.56" → 1234.56,
+> was 1.23 — a 1000× safe-to-spend error). **Task 13 note:** `resweep` only
+> auto-heals rows whose `raw_text` re-parses to exactly ONE transaction —
+> multi-line fallback rows stay in the review queue by design; the queue is
+> their fix.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

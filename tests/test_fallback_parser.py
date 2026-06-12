@@ -37,3 +37,17 @@ def test_decimal_amount_and_unknown_category():
 def test_no_amount_raises():
     with pytest.raises(ValueError):
         fallback_parse("had a nice day", TODAY)
+
+def test_thousands_separator_amounts():
+    (p,) = fallback_parse("1,234.56 rent", TODAY)
+    assert p.amount == 1234.56 and p.category == "Bills"
+    (q,) = fallback_parse("12,345 rent", TODAY)
+    assert q.amount == 12345
+
+def test_arabic_indic_digits():
+    (p,) = fallback_parse("٤٥ فلافل", TODAY)
+    assert p.amount == 45  # unicode digits parse; category degrades to Other
+
+def test_multiline_amountless_line_raises():
+    with pytest.raises(ValueError):
+        fallback_parse("45 falafel\nbought socks no amount\n220 fuel", TODAY)
