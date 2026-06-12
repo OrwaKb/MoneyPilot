@@ -131,6 +131,8 @@ def _ai_parse(conn, text: str, today: dt.date) -> list[ParsedTxn]:
     for attempt in range(2):
         try:
             items = client.extract_json(reply)
+            if not items:
+                raise ValueError("AI returned no transactions")
             return [ParsedTxn(**item) for item in items]
         except (ValueError, ValidationError, TypeError) as e:
             if attempt == 1:

@@ -185,6 +185,15 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > (profile days 1..31, digit-string salary, ParsedTxn entries, sanitized
 > budgets) BEFORE any write and drops the plan's misleading `with self.conn:`.
 
+> **Amendments (code review, Task 15):**
+> `_ai_parse` raises on an empty AI array (a "[]" reply silently stored
+> nothing — entry loss). `save_goal`'s update branch validates `target_date`
+> (junk date bricked the Goals view). Wrong-sign amount edits get a clean
+> error message. **Task 17 note:** do NOT gate the entry box on `startup()`
+> resolving — startup may hold the write lock through a long resweep; and on
+> edit dialogs, always send the goal's existing `target_date` back (omitting
+> it clears the date).
+
 ---
 
 ### Task 1: Project scaffolding & test harness

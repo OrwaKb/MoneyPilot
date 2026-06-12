@@ -142,3 +142,45 @@ def test_set_category_budget_rejects_nonpositive(api):
     res = api.set_category_budget(food, 0)
     assert res["ok"] is False
     assert db.get_budgets(api.conn)[food] == 60000  # unchanged
+
+def test_add_entry_empty_ai_reply_engages_fallback(api, monkeypatch):
+    from app.ai import parser
+    monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: "[]")
+    res = api.add_entry("45 falafel")
+    assert res["ok"] is True and len(res["entries"]) == 1
+    assert res["entries"][0]["needs_review"] == 1  # fallback-flagged, not lost
+
+def test_save_goal_update_rejects_junk_date(api):
+    api.save_goal({"name": "Trip", "goal_type": "save_by_date",
+                   "target_ils": 2000, "target_date": "2026-10-01"})
+    gid = api.get_goals()["goals"][0]["id"]
+    res = api.save_goal({"id": gid, "name": "Trip", "target_ils": 2000,
+                         "target_date": "junk"})
+    assert res["ok"] is False
+    assert api.get_goals()["ok"] is True  # view still renders
+
+def test_update_txn_wrong_sign_clean_error(api, monkeypatch):
+    from app.ai import parser
+    monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: GOOD_REPLY)
+    tid = api.add_entry("45 falafel")["entries"][0]["id"]
+    res = api.update_txn(tid, {"amount_agorot": 4500})  # positive expense
+    assert res["ok"] is False and "sign" in res["error"]
+    assert api.list_ledger({})["rows"][0]["amount_agorot"] == -4500
+
+def test_chat_send_offline(api, monkeypatch):
+    from app.ai import advisor as adv
+    monkeypatch.setattr(adv.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            __import__("app.ai.client", fromlist=["AIUnavailable"]
+                                       ).AIUnavailable("x")))
+    res = api.chat_send("hello?")
+    assert res["ok"] is True and res["offline"] is True
+
+def test_startup_smoke(api, monkeypatch):
+    from app.ai import client, parser
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            client.AIUnavailable("x")))
+    res = api.startup()
+    assert res["ok"] is True and res["onboarded"] is True
+    assert list(api.backup_dir.glob("ledger-*.json"))  # backup written

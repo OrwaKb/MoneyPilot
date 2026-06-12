@@ -3,12 +3,13 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import functools
+import sqlite3
 import threading
 from pathlib import Path
 
 from app import db
 from app.ai import advisor, parser
-from app.engine import budget, goals as goals_eng, insights
+from app.engine import goals as goals_eng, insights
 from app.models import fmt_ils, to_agorot
 
 ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
@@ -98,7 +99,11 @@ class Api:
         with self._lock:
             old = self.conn.execute(
                 "SELECT * FROM transactions WHERE id=?", (txn_id,)).fetchone()
-            db.update_transaction(self.conn, txn_id, **clean)
+            try:
+                db.update_transaction(self.conn, txn_id, **clean)
+            except sqlite3.IntegrityError as e:
+                raise ValueError("amount sign must match direction"
+                                 " (income +, expense/goal -)") from e
             if ("category_id" in clean and old
                     and clean["category_id"] != old["category_id"]
                     and old["description"]):
@@ -168,7 +173,8 @@ class Api:
                 db.update_goal(self.conn, int(g["id"]),
                                name=name,
                                target_agorot=target,
-                               target_date=g.get("target_date"))
+                               target_date=(dt.date.fromisoformat(g["target_date"])
+                                            if g.get("target_date") else None))
             else:
                 db.add_goal(self.conn, name=name,
                             emoji=g.get("emoji", "🎯"),
