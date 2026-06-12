@@ -59,13 +59,14 @@ def chat(conn, text: str, today: dt.date) -> dict:
                         " the Overview are still live. Try again later.",
                 "action": None, "offline": True}
     action = None
-    if "```action" in reply:
+    while "```action" in reply:
         head, _, tail = reply.partition("```action")
         block, _, rest = tail.partition("```")
-        try:
-            action = client.extract_json(block, opener="{")
-        except ValueError:
-            action = None
+        if action is None:
+            try:
+                action = client.extract_json(block, opener="{")
+            except ValueError:
+                action = None
         reply = (head + rest).strip()
     reply = reply.strip()
     db.add_chat(conn, "assistant", reply)
@@ -76,11 +77,17 @@ def apply_action(conn, action: dict, today: dt.date) -> dict:
     """Apply a user-confirmed advisor action. Raises ValueError on bad input."""
     kind = action.get("type")
     if kind == "create_goal":
-        gid = db.add_goal(conn, name=str(action["name"]),
+        name = str(action["name"]).strip()
+        target = to_agorot(action["target_ils"])
+        if not name:
+            raise ValueError("goal name must not be empty")
+        if target <= 0:
+            raise ValueError("goal target must be positive")
+        gid = db.add_goal(conn, name=name,
                           type=("save_by_date"
                                 if action.get("goal_type") == "save_by_date"
                                 else "purchase_fund"),
-                          target_agorot=to_agorot(action["target_ils"]),
+                          target_agorot=target,
                           target_date=(dt.date.fromisoformat(action["target_date"])
                                        if action.get("target_date") else None))
         return {"summary": f"Goal '{action['name']}' created", "goal_id": gid}
@@ -88,9 +95,12 @@ def apply_action(conn, action: dict, today: dt.date) -> dict:
         cat_id = db.category_id_by_name(conn, str(action["category"]))
         if cat_id is None:
             raise ValueError(f"unknown category {action['category']!r}")
-        db.set_budget(conn, cat_id, to_agorot(action["amount_ils"]))
+        amount = to_agorot(action["amount_ils"])
+        if amount <= 0:
+            raise ValueError("budget must be positive")
+        db.set_budget(conn, cat_id, amount)
         return {"summary": f"Budget for {action['category']} set to "
-                           f"{fmt_ils(to_agorot(action['amount_ils']))}"}
+                           f"{fmt_ils(amount)}"}
     if kind == "add_transaction":
         from app.ai import parser  # late import avoids a cycle
         p = ParsedTxn(**action["txn"])
@@ -133,4 +143,15 @@ def onboarding_propose(conn, braindump: str, today: dt.date) -> dict:
                 "effective_date": today - dt.timedelta(days=1)})
         txns.append(p.model_dump(mode="json"))
     proposal["transactions"] = txns
+    budgets = {}
+    for cat, ils in (proposal.get("suggested_budgets") or {}).items():
+        if db.category_id_by_name(conn, str(cat)) is None:
+            continue  # unknown category — drop
+        try:
+            agorot = to_agorot(ils)
+        except ValueError:
+            continue  # non-numeric — drop
+        if agorot > 0:
+            budgets[str(cat)] = round(agorot / 100)
+    proposal["suggested_budgets"] = budgets
     return proposal

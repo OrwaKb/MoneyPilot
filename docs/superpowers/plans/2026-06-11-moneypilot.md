@@ -168,6 +168,14 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > 11 binding note (day keys int 1..31; salary digit-string agorot).
 > `onboarding_propose` clamps today-or-future proposed entries to yesterday per
 > the Task 10 binding note.
+> `apply_action` rejects non-positive goal targets/budgets and blank goal
+> names (confirm-gating doesn't excuse storing corrupt magnitudes).
+> `onboarding_propose` sanitizes `suggested_budgets` (known categories,
+> numeric, positive only). `chat` strips EVERY ```action``` fence from the
+> visible text and applies only the first. **Task 15 notes (binding):**
+> `save_goal`/`set_category_budget` need the same positivity guards; and per
+> the Task 3 amendment, `chat_send`/`get_briefing` MUST hold `self._lock`
+> (the plan snippets omit it).
 
 ---
 

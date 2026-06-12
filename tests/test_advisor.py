@@ -138,3 +138,33 @@ def test_onboarding_clamps_today_dates_to_yesterday(seeded, monkeypatch):
     p = advisor.onboarding_propose(seeded, "spent 100 today", TODAY)
     assert p["transactions"][0]["effective_date"] == \
         (TODAY - dt.timedelta(days=1)).isoformat()
+
+def test_apply_action_rejects_nonpositive_amounts(seeded):
+    import pytest
+    with pytest.raises(ValueError):
+        advisor.apply_action(seeded, {"type": "create_goal", "name": "Bad",
+                                      "goal_type": "purchase_fund",
+                                      "target_ils": -500}, TODAY)
+    with pytest.raises(ValueError):
+        advisor.apply_action(seeded, {"type": "update_budget",
+                                      "category": "Food out",
+                                      "amount_ils": -700}, TODAY)
+    assert db.list_goals(seeded) == []
+
+def test_onboarding_sanitizes_suggested_budgets(seeded, monkeypatch):
+    proposal = {"opening_balance_ils": 5000, "transactions": [],
+                "suggested_budgets": {"Food out": 600, "Groceries": "lots",
+                                      "Spaceships": 100, "Fun": -50}}
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: json.dumps(proposal))
+    p = advisor.onboarding_propose(seeded, "stuff", TODAY)
+    assert p["suggested_budgets"] == {"Food out": 600}
+
+def test_chat_strips_every_action_fence(seeded, monkeypatch):
+    reply = ('One.\n```action\n{"type": "update_budget", "category": "Fun",'
+             ' "amount_ils": 100}\n```\nTwo.\n```action\n'
+             '{"type": "create_goal", "name": "X"}\n```\nEnd.')
+    monkeypatch.setattr(advisor.client, "ask_claude", lambda *a, **k: reply)
+    r = advisor.chat(seeded, "do things", TODAY)
+    assert r["action"]["type"] == "update_budget"  # first action only
+    assert "```" not in r["text"] and "create_goal" not in r["text"]
