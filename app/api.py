@@ -9,7 +9,7 @@ from pathlib import Path
 
 from app import db
 from app.ai import advisor, parser
-from app.engine import goals as goals_eng, insights
+from app.engine import budget, goals as goals_eng, insights
 from app.models import fmt_ils, to_agorot
 
 ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
@@ -123,10 +123,13 @@ class Api:
     def get_overview(self):
         today = self._today()
         fp = insights.fact_pack(self.conn, today)
+        cycle_start = dt.date.fromisoformat(fp["cycle"]["start"])
         return {"safe_to_spend": fp["safe_to_spend"],
                 "categories": fp["categories"], "card": fp["card"],
                 "goals": fp["goals"], "cycle": fp["cycle"],
                 "balance": fp["balance"],
+                # daily expense totals (positive agorot), cycle start -> today
+                "spark": budget.daily_expenses(self.conn, cycle_start, today),
                 "recent": [
                     _txn_dict(r) for r in db.list_transactions(self.conn, limit=5)]}
 

@@ -56,6 +56,25 @@ def test_get_overview_shape(api):
                 "cycle", "balance"):
         assert key in res, key
 
+def test_overview_spark_daily_expenses(api, monkeypatch):
+    # salary_day=10, TODAY=2026-06-11 -> cycle start 2026-06-10, day_index=2
+    from app.ai import parser
+    reply = json.dumps([
+        {"effective_date": "2026-06-10", "amount": 30, "currency": "ILS",
+         "direction": "expense", "category": "Food out",
+         "description": "shawarma", "merchant": None, "people": None,
+         "payment_method": "card", "goal_name": None, "confidence": 0.95},
+        {"effective_date": "2026-06-11", "amount": 45, "currency": "ILS",
+         "direction": "expense", "category": "Food out",
+         "description": "falafel", "merchant": None, "people": None,
+         "payment_method": "card", "goal_name": None, "confidence": 0.95}])
+    monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: reply)
+    api.add_entry("30 shawarma yesterday, 45 falafel")
+    res = api.get_overview()
+    assert res["ok"] is True
+    assert res["spark"] == [3000, 4500]   # agorot per day, zero-filled
+    assert len(res["spark"]) == res["cycle"]["day_index"]
+
 def test_undo_and_update(api, monkeypatch):
     from app.ai import parser
     monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: GOOD_REPLY)

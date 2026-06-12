@@ -53,6 +53,11 @@
       </div>
     </div>
     <div class="ob-nav">
+      <div id="ob-dots" aria-hidden="true">
+        <span class="ob-dot"></span><span class="ob-dot"></span><span
+          class="ob-dot"></span><span class="ob-dot"></span><span
+          class="ob-dot"></span>
+      </div>
       <span id="ob-status" class="sub"></span>
       <button id="ob-next" class="btn primary">NEXT ▸</button>
     </div>
@@ -70,9 +75,11 @@
             stroke-width="1.2" opacity=".55"/>
       <line x1="18.6" y1="12.5" x2="17.2" y2="12.5" stroke="var(--accent)"
             stroke-width="1.2" opacity=".55"/>
-      <line x1="12" y1="12.5" x2="15.57" y2="7.93" stroke="var(--amber)"
-            stroke-width="2" stroke-linecap="round"/>
-      <circle cx="12" cy="12.5" r="1.5" fill="var(--amber)"/>
+      <g class="boot-needle">
+        <line x1="12" y1="12.5" x2="15.57" y2="7.93" stroke="var(--amber)"
+              stroke-width="2" stroke-linecap="round"/>
+        <circle cx="12" cy="12.5" r="1.5" fill="var(--amber)"/>
+      </g>
     </svg>
     <span class="logo-word">MONEYPILOT</span>
   </span>
@@ -99,12 +106,46 @@
         <div class="label">SAFE TO SPEND TODAY</div>
         <div id="ov-sts" class="hero-num">—</div>
         <div id="ov-sts-sub" class="sub"></div>
-        <div class="gaugewrap"><div id="ov-gauge" class="gauge"></div></div>
-        <div id="ov-cycle-sub" class="sub"></div>
+        <div class="dialwrap">
+          <svg id="ov-dial" viewBox="0 0 200 132" aria-hidden="true">
+            <defs>
+              <linearGradient id="dialGrad" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#4ef0c0"/>
+                <stop offset="1" stop-color="#2da8ff"/>
+              </linearGradient>
+            </defs>
+            <g id="ov-ticks"></g>
+            <path class="dial-track" d="M 44.57 118 A 64 64 0 1 1 155.43 118"/>
+            <path id="ov-gauge" class="dial-fill" pathLength="100"
+                  d="M 44.57 118 A 64 64 0 1 1 155.43 118"/>
+            <g id="ov-needle">
+              <line x1="100" y1="94" x2="100" y2="41"/>
+              <circle class="hub" cx="100" cy="86" r="3.6"/>
+              <circle class="hub-in" cx="100" cy="86" r="1.4"/>
+            </g>
+            <text id="ov-day" class="dial-day" x="100" y="116">—</text>
+            <text id="ov-day-cap" class="dial-cap" x="100" y="128">CYCLE DAY</text>
+          </svg>
+        </div>
+        <div id="ov-sparkwrap" class="sparkwrap hidden">
+          <div class="spark-head">
+            <span class="spark-label">DAILY SPEND // CYCLE</span>
+            <span id="ov-spark-max" class="spark-max"></span>
+          </div>
+          <svg id="ov-spark" viewBox="0 0 420 30" preserveAspectRatio="none"
+               aria-hidden="true"></svg>
+        </div>
       </div>
       <div class="panel">
         <div class="label">CATEGORIES // THIS CYCLE</div>
         <div id="ov-cats"></div>
+        <div id="ov-share" class="share hidden">
+          <div id="ov-donut" class="donut" aria-hidden="true"></div>
+          <div class="share-right">
+            <div class="label">SPEND SHARE</div>
+            <div id="ov-donut-legend" class="donut-legend"></div>
+          </div>
+        </div>
       </div>
       <div class="panel">
         <div class="label">UPCOMING CARD CHARGE</div>
@@ -164,6 +205,7 @@
     <div class="chat-layout">
       <aside id="ch-side">
         <button id="ch-new" class="btn primary">+ NEW CHAT</button>
+        <div class="label side-label">CONVERSATIONS</div>
         <div id="ch-list"></div>
       </aside>
       <div class="chat-main">

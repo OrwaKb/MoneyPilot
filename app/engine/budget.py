@@ -73,6 +73,19 @@ def category_status(conn, today: dt.date) -> list[dict]:
     return out
 
 
+def daily_expenses(conn, start: dt.date, end: dt.date) -> list[int]:
+    """Positive agorot expense total per day, start..end inclusive, zero-filled."""
+    rows = conn.execute(
+        "SELECT effective_date AS d, COALESCE(SUM(-amount_agorot),0) AS s"
+        " FROM transactions WHERE deleted_at IS NULL AND direction='expense'"
+        " AND effective_date >= ? AND effective_date <= ?"
+        " GROUP BY effective_date",
+        (start.isoformat(), end.isoformat())).fetchall()
+    by_day = {r["d"]: r["s"] for r in rows}
+    return [by_day.get((start + dt.timedelta(days=i)).isoformat(), 0)
+            for i in range((end - start).days + 1)]
+
+
 def card_accrual(conn, today: dt.date) -> dict:
     w = cycles.card_window(today, int(db.get_setting(conn, "card_charge_day", "1")))
     total = _expense_sum(conn, start=w["start"],

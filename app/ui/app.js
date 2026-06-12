@@ -133,20 +133,120 @@ async function submitEntry() {
 })();
 
 /* --- OVERVIEW ------------------------------------------------------------ */
+/* instrument helpers (presentational; numbers only reach the DOM) */
+const reducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+// 240-degree dial tick marks, generated once (pure geometry, no user data)
+function dialTicks() {
+  const g = $("#ov-ticks");
+  if (!g || g.childElementCount) return;
+  const NS = "http://www.w3.org/2000/svg", CX = 100, CY = 86;
+  for (let k = 0; k <= 24; k++) {
+    const major = k % 3 === 0;
+    const a = (-120 + k * 10) * Math.PI / 180;   // clockwise from 12 o'clock
+    const r1 = major ? 50 : 53.5, r2 = 57;
+    const ln = document.createElementNS(NS, "line");
+    ln.setAttribute("x1", (CX + r1 * Math.sin(a)).toFixed(2));
+    ln.setAttribute("y1", (CY - r1 * Math.cos(a)).toFixed(2));
+    ln.setAttribute("x2", (CX + r2 * Math.sin(a)).toFixed(2));
+    ln.setAttribute("y2", (CY - r2 * Math.cos(a)).toFixed(2));
+    ln.setAttribute("class", major ? "tick major" : "tick");
+    g.appendChild(ln);
+  }
+}
+
+// hero count-up; only clean non-negative integer amounts animate, and the
+// final frame always lands on the exact backend fmt string
+function heroCount(el, fmt) {
+  const m = /^₪([\d,]+)$/.exec(String(fmt));
+  const target = m ? Number(m[1].replace(/,/g, "")) : null;
+  if (target === null || reducedMotion()) {
+    el.textContent = fmt; el._v = target; return;
+  }
+  const from = Number.isFinite(el._v) ? el._v : 0;
+  el._v = target;
+  if (from === target) { el.textContent = fmt; return; }
+  cancelAnimationFrame(el._raf);
+  const t0 = performance.now(), DUR = 600;
+  const frame = (t) => {
+    const k = Math.min(1, (t - t0) / DUR);
+    const e = 1 - Math.pow(1 - k, 3);                  // ease-out cubic
+    if (k < 1) {
+      el.textContent =
+        "₪" + Math.round(from + (target - from) * e).toLocaleString("en-US");
+      el._raf = requestAnimationFrame(frame);
+    } else { el.textContent = fmt; }
+  };
+  el._raf = requestAnimationFrame(frame);
+}
+
+// category-share donut: top 5 by spend + other
+const SHARE_COLORS = ["#4ef0c0", "#2da8ff", "#ffb46b",
+                      "#b48cff", "#ff6b7a", "#5b7290"];
+function renderDonut(categories) {
+  const wrap = $("#ov-share");
+  const spent = (categories || [])
+    .map((c) => ({ name: c.name, v: Math.max(0, Math.round(c.spent_agorot)) }))
+    .filter((c) => c.v > 0)
+    .sort((a, b) => b.v - a.v);
+  const top = spent.slice(0, 5);
+  const other = spent.slice(5).reduce((s, c) => s + c.v, 0);
+  if (other > 0) top.push({ name: "other", v: other });
+  const total = top.reduce((s, c) => s + c.v, 0);
+  if (!total) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  let acc = 0;
+  const col = (i) => SHARE_COLORS[i % SHARE_COLORS.length];
+  const stops = top.map((c, i) => {
+    const a0 = (acc / total) * 360; acc += c.v;
+    const a1 = (acc / total) * 360;
+    return `${col(i)} ${a0.toFixed(2)}deg ${a1.toFixed(2)}deg`;
+  }).join(", ");
+  $("#ov-donut").style.background = `conic-gradient(from -90deg, ${stops})`;
+  $("#ov-donut-legend").innerHTML = top.map((c, i) =>
+    `<div class="lg-row">
+       <span class="lg-dot" style="background:${col(i)}"></span>
+       <span class="lg-name">${esc(c.name)}</span>
+       <span class="lg-val">₪${Math.round(c.v / 100)} · ${
+         Math.round(100 * c.v / total)}%</span>
+     </div>`).join("");
+}
+
+// daily-spend sparkline (positive agorot per cycle day, from overview.spark)
+function renderSpark(spark) {
+  const wrap = $("#ov-sparkwrap"), svg = $("#ov-spark");
+  const vals = (Array.isArray(spark) ? spark : [])
+    .map((v) => Math.max(0, Number(v) || 0));
+  if (vals.length < 2) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  const W = 420, H = 30, PAD = 3, max = Math.max(...vals, 1);
+  const pts = vals.map((v, i) =>
+    `${((i / (vals.length - 1)) * W).toFixed(2)},${
+       (H - PAD - (v / max) * (H - 2 * PAD)).toFixed(2)}`);
+  svg.innerHTML =
+    `<polygon class="spark-area" points="0,${H} ${pts.join(" ")} ${W},${H}"/>` +
+    `<polyline class="spark-line" points="${pts.join(" ")}" pathLength="100"/>`;
+  $("#ov-spark-max").textContent = `peak ₪${Math.round(max / 100)}`;
+}
+
 renderers.overview = async function renderOverview() {
   const o = await api("get_overview");
   if (!o.ok) { toast(o.error); return; }
 
-  $("#ov-sts").textContent = o.safe_to_spend.today_fmt;
+  heroCount($("#ov-sts"), o.safe_to_spend.today_fmt);
   $("#ov-sts-sub").textContent =
     `${o.safe_to_spend.remaining_fmt} left · ${o.safe_to_spend.days_left} days to salary`;
   const pct = Math.min(100,
     Math.round(100 * o.cycle.day_index / o.cycle.length));
-  $("#ov-gauge").style.width = pct + "%";
-  $("#ov-cycle-sub").textContent =
-    `cycle day ${o.cycle.day_index} of ${o.cycle.length}`;
+  dialTicks();
+  $("#ov-gauge").style.strokeDashoffset = String(100 - pct);
+  $("#ov-needle").style.transform = `rotate(${-120 + pct * 2.4}deg)`;
+  $("#ov-day").textContent = String(Number(o.cycle.day_index) || 0);
+  $("#ov-day-cap").textContent = `OF ${Number(o.cycle.length) || 0} DAYS`;
   $("#cycle-info").textContent =
     `CYCLE ${o.cycle.start} → ${o.cycle.end}`;
+  renderSpark(o.spark);
 
   $("#ov-cats").innerHTML = o.categories
     .filter((c) => !c.is_fixed)
@@ -165,6 +265,7 @@ renderers.overview = async function renderOverview() {
         <div class="bar"><div class="fill" style="width:${used}%"></div></div>
       </div>`;
     }).join("");
+  renderDonut(o.categories);
 
   $("#ov-card").textContent = o.card.total_fmt;
   $("#ov-card-sub").textContent =
@@ -356,6 +457,18 @@ function chatBubble(role, text) {
   return div;
 }
 
+// three-dot typing indicator (pure DOM, removed when the reply lands)
+function typingBubble() {
+  const es = $("#ch-thread .empty-state");
+  if (es) es.remove();
+  const div = document.createElement("div");
+  div.className = "bubble assistant typing";
+  for (let i = 0; i < 3; i++) div.appendChild(document.createElement("span"));
+  $("#ch-thread").appendChild(div);
+  $("#ch-thread").scrollTop = $("#ch-thread").scrollHeight;
+  return div;
+}
+
 function chatActionCard(action) {
   const div = document.createElement("div");
   div.className = "actioncard";
@@ -463,7 +576,7 @@ async function chatSend() {
   if (!text) return;
   input.value = "";
   chatBubble("user", text);
-  const thinking = chatBubble("assistant", "…");
+  const thinking = typingBubble();
   const res = await api("chat_send", text, currentChatId);
   thinking.remove();
   if (!res.ok) { toast(res.error); return; }
@@ -504,7 +617,13 @@ window.startOnboarding = function startOnboarding() {
     step = n;
     document.querySelectorAll(".ob-step").forEach((s) =>
       s.classList.toggle("hidden", Number(s.dataset.step) !== n));
-    $("#ob-next").textContent = n === 4 ? "CONFIRM ✓" : "NEXT ▸";
+    document.querySelectorAll("#ob-dots .ob-dot").forEach((d, i) => {
+      d.classList.toggle("done", i < n);
+      d.classList.toggle("cur", i === n);
+    });
+    const next = $("#ob-next");
+    next.textContent = n === 4 ? "CONFIRM ✓" : "NEXT ▸";
+    next.classList.toggle("confirm", n === 4);
   }
 
   function renderProposal(p) {
