@@ -30,6 +30,9 @@ def _via_sdk(prompt: str, system, timeout_s: int) -> str:
         result = None
         with anyio.move_on_after(timeout_s):
             async for message in query(prompt=prompt, options=opts):
+                if getattr(message, "is_error", False):
+                    raise RuntimeError(f"SDK error result: "
+                                       f"{getattr(message, 'result', '')!r}")
                 r = getattr(message, "result", None)
                 if isinstance(r, str):
                     result = r
@@ -70,6 +73,8 @@ def ask_claude(prompt: str, system=None, timeout_s: int = 60) -> str:
     """Primary: Agent SDK. Fallback: claude -p. Raises AIUnavailable if both fail."""
     try:
         return _via_sdk(prompt, system, timeout_s)
-    except Exception:
-        pass  # SDK missing/broken/timed out — the CLI is the safety net
-    return _via_cli(prompt, system, timeout_s)
+    except Exception as sdk_exc:
+        try:
+            return _via_cli(prompt, system, timeout_s)
+        except AIUnavailable as cli_exc:
+            raise AIUnavailable(f"SDK: {sdk_exc!r}; CLI: {cli_exc}") from cli_exc

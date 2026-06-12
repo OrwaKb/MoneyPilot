@@ -60,6 +60,7 @@ Schemas: create_goal {"type":"create_goal","name":str,"goal_type":"save_by_date"
 update_budget {"type":"update_budget","category":str,"amount_ils":number}
 add_transaction {"type":"add_transaction","txn":{<same fields as the parser schema>}}
 adjust_setting {"type":"adjust_setting","key":"salary_day"|"salary_amount_agorot"|"card_charge_day"|"user_name","value":str}
+For adjust_setting: salary_amount_agorot is in AGOROT (shekels × 100 — "set salary to 6000 shekels" means value "600000"); salary_day and card_charge_day must be integers 1-31.
 The app will show the action to the user for confirmation — describe it in your
 text too. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — point out the conflict when goals come up."""
 
@@ -80,7 +81,8 @@ object (no prose):
    people, payment_method, goal_name, confidence>],
  "suggested_budgets": {"<category name>": <ILS per month>, ...}}
 Budget suggestions must cover the provided category list (skip income categories),
-be realistic given their salary and dump, and sum comfortably below the salary."""
+be realistic given their salary and dump, and sum comfortably below the salary.
+ Date every month-to-date transaction STRICTLY BEFORE today (for "today" mentions use yesterday) — the opening balance the user states already reflects them."""
 
 ONBOARD_USER_TMPL = """TODAY: {today}
 CATEGORIES: {categories}

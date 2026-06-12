@@ -131,6 +131,18 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > `direction` and exactly five fields — merchant/people/raw_text never enter
 > prompts.
 
+> **Amendments (code review, Task 11):** `_via_sdk` rejects `is_error` result
+> messages (an API-error string must never be harvested as a briefing/parse).
+> `ask_claude` chains both failure reasons into its `AIUnavailable`. CHAT_SYSTEM
+> documents adjust_setting units (agorot = shekels × 100; day keys 1-31);
+> ONBOARD_SYSTEM enforces the strictly-before-today dating rule. `anyio` is a
+> declared dependency. **Task 14 note (binding):** `apply_action` must validate
+> adjust_setting values before `set_setting` — `salary_day`/`card_charge_day`
+> int in 1..31, `salary_amount_agorot` digit-string > 0 — and reject otherwise;
+> do not store LLM-produced values verbatim. Optional future hardening: CLI
+> fallback could use `--system-prompt` (replace) instead of
+> `--append-system-prompt` for exact SDK parity.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

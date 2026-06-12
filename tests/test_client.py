@@ -46,3 +46,12 @@ def test_ask_claude_raises_when_both_fail(monkeypatch):
                         lambda *a: (_ for _ in ()).throw(client.AIUnavailable("x")))
     with pytest.raises(client.AIUnavailable):
         client.ask_claude("hi")
+
+def test_ask_claude_error_carries_both_reasons(monkeypatch):
+    monkeypatch.setattr(client, "_via_sdk",
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(client, "_via_cli",
+                        lambda *a: (_ for _ in ()).throw(client.AIUnavailable("nope")))
+    with pytest.raises(client.AIUnavailable) as ei:
+        client.ask_claude("hi")
+    assert "boom" in str(ei.value) and "nope" in str(ei.value)
