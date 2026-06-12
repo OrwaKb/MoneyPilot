@@ -246,3 +246,172 @@ $("#lg-export").addEventListener("click", async () => {
   const res = await api("export_csv", month);
   toast(res.ok ? "exported: " + res.path : res.error);
 });
+
+/* --- GOALS ------------------------------------------------------------------ */
+renderers.goals = async function renderGoals() {
+  const res = await api("get_goals");
+  if (!res.ok) { toast(res.error); return; }
+  $("#gl-cards").innerHTML = res.goals.map((g) => {
+    const verdictCls = g.verdict === "ready" ? "ready"
+      : g.verdict === "behind" ? "behind" : "";
+    const lines = [
+      `${g.progress_fmt} / ${g.target_fmt}`,
+      g.pace_needed_fmt ? `needs ${g.pace_needed_fmt}/mo` : null,
+      g.projected_date ? `projected ${g.projected_date}` : null,
+    ].filter(Boolean).join(" · ");
+    return `<div class="panel goalcard" data-id="${g.id}">
+      <div class="meta" style="display:flex;justify-content:space-between">
+        <b>${esc(g.emoji)} ${esc(g.name)}</b>
+        <button class="rowbtn" data-act="arch" title="archive">✕</button></div>
+      <div class="bar"><div class="fill" style="width:${g.pct}%"></div></div>
+      <div class="sub">${esc(lines)}</div>
+      <div class="sub verdict ${verdictCls}">${esc(g.verdict)} · ${g.pct}%</div>
+    </div>`;
+  }).join("") || `<span class="sub">no active goals</span>`;
+};
+
+$("#gl-cards").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-act=arch]");
+  if (!btn) return;
+  await api("archive_goal", Number(btn.closest(".goalcard").dataset.id));
+  refreshAll();
+});
+
+$("#gl-save").addEventListener("click", async () => {
+  const res = await api("save_goal", {
+    name: $("#gl-name").value.trim(),
+    goal_type: $("#gl-type").value,
+    target_ils: parseFloat($("#gl-target").value),
+    target_date: $("#gl-date").value || null,
+  });
+  if (!res.ok) { toast(res.error); return; }
+  $("#gl-name").value = $("#gl-target").value = $("#gl-date").value = "";
+  refreshAll();
+});
+
+/* --- ADVISOR -------------------------------------------------------------------- */
+function chatBubble(role, text) {
+  const div = document.createElement("div");
+  div.className = "bubble " + role;
+  div.textContent = text;
+  $("#ch-thread").appendChild(div);
+  $("#ch-thread").scrollTop = $("#ch-thread").scrollHeight;
+  return div;
+}
+
+function chatActionCard(action) {
+  const div = document.createElement("div");
+  div.className = "actioncard";
+  div.textContent = "⚡ proposed: " + JSON.stringify(action);
+  const btn = document.createElement("button");
+  btn.className = "btn primary";
+  btn.textContent = "APPLY";
+  btn.onclick = async () => {
+    const res = await api("chat_apply_action", action);
+    toast(res.ok ? res.summary : res.error);
+    if (res.ok) { div.remove(); refreshAll(); }
+  };
+  div.appendChild(btn);
+  $("#ch-thread").appendChild(div);
+  $("#ch-thread").scrollTop = $("#ch-thread").scrollHeight;
+}
+
+renderers.advisor = async function renderAdvisor() {
+  const res = await api("get_chat_history");
+  if (!res.ok) return;
+  $("#ch-thread").innerHTML = "";
+  for (const m of res.messages) chatBubble(m.role, m.text);
+};
+
+async function chatSend() {
+  const input = $("#ch-input");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  chatBubble("user", text);
+  const thinking = chatBubble("assistant", "…");
+  const res = await api("chat_send", text);
+  thinking.remove();
+  if (!res.ok) { toast(res.error); return; }
+  chatBubble("assistant", res.text);
+  if (res.offline) toast("advisor offline — numbers on Overview are still live");
+  if (res.action) chatActionCard(res.action);
+}
+
+$("#ch-send").addEventListener("click", chatSend);
+$("#ch-input").addEventListener("keydown",
+  (e) => { if (e.key === "Enter") chatSend(); });
+
+/* --- ONBOARDING -------------------------------------------------------------------- */
+window.startOnboarding = function startOnboarding() {
+  $("#onboarding").classList.remove("hidden");
+  let step = 0;
+  let proposal = null;
+
+  function show(n) {
+    step = n;
+    document.querySelectorAll(".ob-step").forEach((s) =>
+      s.classList.toggle("hidden", Number(s.dataset.step) !== n));
+    $("#ob-next").textContent = n === 4 ? "CONFIRM ✓" : "NEXT ▸";
+  }
+
+  function renderProposal(p) {
+    const rows = [
+      `<div class="prow">opening balance ₪
+        <input id="obp-balance" value="${p.opening_balance_ils ?? 0}"></div>`,
+      `<div class="prow"><b>month so far:</b></div>`,
+      ...(p.transactions || []).map((t, i) =>
+        `<div class="prow">${esc(t.effective_date)} · ${esc(t.category)} ·
+          ${esc(t.description)} ₪<input data-pi="${i}" value="${t.amount}"></div>`),
+      `<div class="prow"><b>suggested budgets (₪/mo):</b></div>`,
+      ...Object.entries(p.suggested_budgets || {}).map(([name, ils]) =>
+        `<div class="prow">${esc(name)} ₪
+          <input data-pb="${esc(name)}" value="${ils}"></div>`),
+    ];
+    $("#ob-proposal").innerHTML = rows.join("");
+  }
+
+  $("#ob-next").onclick = async () => {
+    if (step === 0 && !$("#ob-name").value.trim()) return;
+    if (step < 3) { show(step + 1); return; }
+    if (step === 3) {
+      $("#ob-status").textContent = "Claude is reading your dump…";
+      const res = await api("onboarding_braindump", $("#ob-dump").value);
+      $("#ob-status").textContent = "";
+      if (!res.ok) {
+        toast("AI unreachable — starting with a blank slate. " + res.error);
+        proposal = { opening_balance_ils: 0, transactions: [],
+                     suggested_budgets: {} };
+      } else {
+        proposal = res.proposal;
+      }
+      renderProposal(proposal);
+      show(4);
+      return;
+    }
+    // step 4 → confirm
+    proposal.opening_balance_ils = parseFloat($("#obp-balance").value) || 0;
+    document.querySelectorAll("[data-pi]").forEach((inp) => {
+      proposal.transactions[Number(inp.dataset.pi)].amount =
+        parseFloat(inp.value) || 0;
+    });
+    proposal.transactions = proposal.transactions.filter((t) => t.amount > 0);
+    const budgets = {};
+    document.querySelectorAll("[data-pb]").forEach((inp) => {
+      budgets[inp.dataset.pb] = parseFloat(inp.value) || 0;
+    });
+    proposal.suggested_budgets = budgets;
+    const res = await api("onboarding_complete", {
+      user_name: $("#ob-name").value.trim(),
+      salary_day: $("#ob-salary-day").value || "1",
+      salary_amount_agorot: String(
+        Math.round((parseFloat($("#ob-salary").value) || 0) * 100)),
+      card_charge_day: $("#ob-card-day").value || "1",
+    }, proposal);
+    if (!res.ok) { toast(res.error); return; }
+    $("#onboarding").classList.add("hidden");
+    await refreshAll();
+  };
+
+  show(0);
+};
