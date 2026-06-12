@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import socket
+import sys
 import threading
 from pathlib import Path
 
@@ -19,6 +20,24 @@ from app.api import Api
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 SINGLETON_PORT_FILE = "port.lock"
+
+
+def _suppress_child_consoles() -> None:
+    """Windowless parents (pythonw) get a visible console for every console
+    child the Claude Agent SDK spawns. Inject CREATE_NO_WINDOW into every
+    Popen unless the caller asked for a console explicitly."""
+    import subprocess
+    flag = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    visible = (getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+               | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+    orig = subprocess.Popen.__init__
+
+    def patched(self, *args, **kwargs):
+        if not kwargs.get("creationflags", 0) & visible:
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | flag
+        orig(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = patched
 
 
 def data_dir() -> Path:
@@ -63,6 +82,9 @@ def _serve_singleton(ddir: Path, api: Api) -> None:
 
 
 def main() -> None:
+    if sys.platform == "win32":
+        _suppress_child_consoles()
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--dev", action="store_true")
     ap.add_argument("--restore", metavar="BACKUP_JSON")
