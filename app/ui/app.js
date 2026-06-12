@@ -29,7 +29,7 @@ function toast(msg, action) {            // action: {label, fn} optional
     const b = document.createElement("button");
     b.className = "toast-btn";
     b.textContent = action.label;
-    b.onclick = () => { action.fn(); t.remove(); };
+    b.onclick = () => { action.fn(); t.classList.add("hidden"); };
     t.appendChild(b);
   }
   t.classList.remove("hidden");
