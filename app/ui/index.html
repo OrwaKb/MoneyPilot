@@ -161,10 +161,18 @@
   </section>
 
   <section id="tab-advisor" class="tabpane hidden">
-    <div id="ch-thread" class="chat-thread"></div>
-    <div class="chat-inputrow">
-      <input id="ch-input" placeholder="ask anything about your money…">
-      <button id="ch-send" class="btn primary">SEND</button>
+    <div class="chat-layout">
+      <aside id="ch-side">
+        <button id="ch-new" class="btn primary">+ NEW CHAT</button>
+        <div id="ch-list"></div>
+      </aside>
+      <div class="chat-main">
+        <div id="ch-thread" class="chat-thread"></div>
+        <div class="chat-inputrow">
+          <input id="ch-input" placeholder="ask anything about your money…">
+          <button id="ch-send" class="btn primary">SEND</button>
+        </div>
+      </div>
     </div>
   </section>
 </main>

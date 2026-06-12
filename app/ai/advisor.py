@@ -46,11 +46,25 @@ def get_briefing(conn, today: dt.date, force: bool = False) -> dict:
         return {"text": template_briefing(fp), "source": "template"}
 
 
-def chat(conn, text: str, today: dt.date) -> dict:
-    db.add_chat(conn, "user", text)
+def _chat_title(text: str) -> str:
+    """First line of `text`, whitespace-collapsed, max 48 chars (… if cut)."""
+    first = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    title = " ".join(first.split())
+    if len(title) > 48:
+        title = title[:48] + "…"
+    return title
+
+
+def chat(conn, text: str, today: dt.date, conversation_id=None) -> dict:
+    title = None
+    if conversation_id is None:
+        title = _chat_title(text)
+        conversation_id = db.add_conversation(conn, title)
+    db.add_chat(conn, "user", text, conversation_id=conversation_id)
     fp = insights.fact_pack(conn, today)
-    history = "\n".join(f"{c['role'].upper()}: {c['text']}"
-                        for c in db.recent_chat(conn, 20)[:-1]) or "(none)"
+    history = "\n".join(
+        f"{c['role'].upper()}: {c['text']}"
+        for c in db.recent_chat(conn, 20, conversation_id)[:-1]) or "(none)"
     try:
         reply = client.ask_claude(
             prompts.CHAT_USER_TMPL.format(facts=json.dumps(fp),
@@ -59,7 +73,8 @@ def chat(conn, text: str, today: dt.date) -> dict:
     except Exception:
         return {"text": "Advisor offline — your data is safe and the numbers on"
                         " the Overview are still live. Try again later.",
-                "action": None, "offline": True}
+                "action": None, "offline": True,
+                "conversation_id": conversation_id, "title": title}
     action = None
     while "```action" in reply:
         head, _, tail = reply.partition("```action")
@@ -71,8 +86,9 @@ def chat(conn, text: str, today: dt.date) -> dict:
                 action = None
         reply = (head + rest).strip()
     reply = reply.strip()
-    db.add_chat(conn, "assistant", reply)
-    return {"text": reply, "action": action, "offline": False}
+    db.add_chat(conn, "assistant", reply, conversation_id=conversation_id)
+    return {"text": reply, "action": action, "offline": False,
+            "conversation_id": conversation_id, "title": title}
 
 
 def apply_action(conn, action: dict, today: dt.date) -> dict:

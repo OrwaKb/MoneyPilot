@@ -40,11 +40,66 @@ def test_chat(conn):
     rows = db.recent_chat(conn, 10)
     assert [r["role"] for r in rows] == ["user", "assistant"]  # oldest first
 
+
+def test_conversation_crud(conn):
+    cid = db.add_conversation(conn, "My budget chat")
+    convs = db.list_conversations(conn)
+    assert len(convs) == 1
+    assert convs[0]["id"] == cid and convs[0]["title"] == "My budget chat"
+    assert convs[0]["msg_count"] == 0
+    db.delete_conversation(conn, cid)
+    assert db.list_conversations(conn) == []
+
+
+def test_add_conversation_strips_and_defaults_title(conn):
+    a = db.add_conversation(conn, "  spaced  ")
+    b = db.add_conversation(conn, "   ")  # empty after strip → 'New chat'
+    convs = {c["id"]: c["title"] for c in db.list_conversations(conn)}
+    assert convs[a] == "spaced"
+    assert convs[b] == "New chat"
+
+
+def test_list_conversations_orders_by_last_activity(conn):
+    first = db.add_conversation(conn, "first")
+    second = db.add_conversation(conn, "second")
+    # message in `first` makes it the most recently active despite being older
+    db.add_chat(conn, "user", "hi there", conversation_id=first)
+    convs = db.list_conversations(conn)
+    assert [c["id"] for c in convs] == [first, second]
+    assert convs[0]["msg_count"] == 1
+    assert convs[0]["last_ts"] >= convs[0]["created_at"]
+    # empty conversation falls back to created_at for last_ts
+    assert convs[1]["last_ts"] == convs[1]["created_at"]
+    assert convs[1]["msg_count"] == 0
+
+
+def test_recent_chat_filtered_vs_unfiltered(conn):
+    a = db.add_conversation(conn, "A")
+    b = db.add_conversation(conn, "B")
+    db.add_chat(conn, "user", "in-a", conversation_id=a)
+    db.add_chat(conn, "user", "in-b", conversation_id=b)
+    # None mode: all messages (back-compat)
+    allmsgs = db.recent_chat(conn, 10)
+    assert [r["text"] for r in allmsgs] == ["in-a", "in-b"]
+    # filtered by conversation
+    assert [r["text"] for r in db.recent_chat(conn, 10, a)] == ["in-a"]
+    assert [r["text"] for r in db.recent_chat(conn, 10, b)] == ["in-b"]
+
+
+def test_delete_conversation_removes_its_messages(conn):
+    cid = db.add_conversation(conn, "doomed")
+    db.add_chat(conn, "user", "bye", conversation_id=cid)
+    db.delete_conversation(conn, cid)
+    assert db.list_conversations(conn) == []
+    assert db.recent_chat(conn, 10, cid) == []
+
 def test_export_import_roundtrip(conn, tmp_path):
     db.set_setting(conn, "salary_day", "10")
     db.add_goal(conn, name="G", type="purchase_fund", target_agorot=100)
     db.add_transaction(conn, effective_date=D, amount_agorot=-100,
                        direction="expense")
+    cid = db.add_conversation(conn, "Roundtrip chat")
+    db.add_chat(conn, "user", "carry me", conversation_id=cid)
     data = db.export_json(conn)
     c2 = db.connect(tmp_path / "restored.db")
     db.init_db(c2)
@@ -52,6 +107,10 @@ def test_export_import_roundtrip(conn, tmp_path):
     assert db.get_setting(c2, "salary_day") == "10"
     assert len(db.list_transactions(c2)) == 1
     assert len(db.list_goals(c2)) == 1
+    convs = db.list_conversations(c2)
+    assert len(convs) == 1 and convs[0]["title"] == "Roundtrip chat"
+    assert [r["text"] for r in db.recent_chat(c2, 10, convs[0]["id"])] \
+        == ["carry me"]
 
 def test_daily_backup_written_once_and_pruned(conn, tmp_path):
     bdir = tmp_path / "backups"

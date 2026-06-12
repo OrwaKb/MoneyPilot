@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_CATEGORIES = [
     # (name, emoji, is_income, is_fixed)
@@ -49,8 +49,12 @@ CREATE TABLE IF NOT EXISTS budgets(
   category_id INTEGER PRIMARY KEY REFERENCES categories(id),
   amount_agorot INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS conversations(
+  id INTEGER PRIMARY KEY, title TEXT NOT NULL DEFAULT 'New chat',
+  created_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS chat_history(
-  id INTEGER PRIMARY KEY, ts TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL);
+  id INTEGER PRIMARY KEY, ts TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL,
+  conversation_id INTEGER REFERENCES conversations(id));
 CREATE TABLE IF NOT EXISTS briefings(
   date TEXT PRIMARY KEY, text TEXT NOT NULL, fact_pack_json TEXT NOT NULL);
 """
@@ -78,6 +82,34 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES('schema_version', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
+    _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring an existing DB up to SCHEMA_VERSION. Fresh DBs are stamped at the
+    current version by init_db, so each block here is a no-op for them."""
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    version = int(row["value"]) if row else SCHEMA_VERSION
+    if version < 2:
+        # chat_history pre-v2 lacks conversation_id (the CREATE in _SCHEMA only
+        # adds it for brand-new DBs); add the column on legacy files.
+        cols = {r["name"] for r in conn.execute(
+            "PRAGMA table_info(chat_history)")}
+        if "conversation_id" not in cols:
+            conn.execute("ALTER TABLE chat_history ADD COLUMN"
+                         " conversation_id INTEGER REFERENCES conversations(id)")
+        # adopt any orphaned legacy messages into one 'Earlier conversation'
+        oldest = conn.execute(
+            "SELECT MIN(ts) AS ts, COUNT(*) AS n FROM chat_history").fetchone()
+        if oldest["n"]:
+            cur = conn.execute(
+                "INSERT INTO conversations(title, created_at) VALUES(?,?)",
+                ("Earlier conversation", oldest["ts"]))
+            conn.execute("UPDATE chat_history SET conversation_id=?",
+                         (cur.lastrowid,))
+        conn.execute("UPDATE meta SET value='2' WHERE key='schema_version'")
+        conn.commit()
 
 
 # --- settings -------------------------------------------------------------
@@ -287,22 +319,62 @@ def put_briefing(conn, date_iso: str, text: str, fact_pack_json: str) -> None:
     conn.commit()
 
 
-def add_chat(conn, role: str, text: str) -> None:
-    conn.execute("INSERT INTO chat_history(ts, role, text) VALUES(?,?,?)",
-                 (dt.datetime.now().isoformat(timespec="seconds"), role, text))
+def add_conversation(conn, title: str) -> int:
+    title = (title or "").strip() or "New chat"
+    cur = conn.execute(
+        "INSERT INTO conversations(title, created_at) VALUES(?,?)",
+        (title, dt.datetime.now().isoformat(timespec="seconds")))
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_conversations(conn) -> list:
+    # last_ts orders by activity; MAX(h.id) is the tie-break so two chats
+    # touched in the same wall-clock second still sort by true recency.
+    rows = conn.execute(
+        "SELECT c.id, c.title, c.created_at,"
+        " COALESCE(MAX(h.ts), c.created_at) AS last_ts,"
+        " COUNT(h.id) AS msg_count"
+        " FROM conversations c"
+        " LEFT JOIN chat_history h ON h.conversation_id = c.id"
+        " GROUP BY c.id"
+        " ORDER BY last_ts DESC, MAX(h.id) DESC, c.id DESC")
+    return [dict(r) for r in rows]
+
+
+def delete_conversation(conn, conversation_id: int) -> None:
+    # chats aren't money — hard-delete the messages then the conversation row
+    conn.execute("DELETE FROM chat_history WHERE conversation_id=?",
+                 (conversation_id,))
+    conn.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
     conn.commit()
 
 
-def recent_chat(conn, n: int) -> list:
-    rows = list(conn.execute(
-        "SELECT * FROM chat_history ORDER BY id DESC LIMIT ?", (n,)))
+def add_chat(conn, role: str, text: str, conversation_id=None) -> None:
+    conn.execute(
+        "INSERT INTO chat_history(ts, role, text, conversation_id)"
+        " VALUES(?,?,?,?)",
+        (dt.datetime.now().isoformat(timespec="seconds"), role, text,
+         conversation_id))
+    conn.commit()
+
+
+def recent_chat(conn, n: int, conversation_id=None) -> list:
+    if conversation_id is None:
+        rows = list(conn.execute(
+            "SELECT * FROM chat_history ORDER BY id DESC LIMIT ?", (n,)))
+    else:
+        rows = list(conn.execute(
+            "SELECT * FROM chat_history WHERE conversation_id=?"
+            " ORDER BY id DESC LIMIT ?", (conversation_id, n)))
     return rows[::-1]  # oldest first
 
 
 # --- backup / restore ----------------------------------------------------------
 
 _EXPORT_TABLES = ["categories", "goals", "transactions", "category_rules",
-                  "budgets", "settings", "chat_history", "briefings"]
+                  "budgets", "settings", "conversations", "chat_history",
+                  "briefings"]
 
 
 def export_json(conn) -> dict:

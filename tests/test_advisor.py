@@ -51,6 +51,68 @@ def test_chat_offline(seeded, monkeypatch):
     r = advisor.chat(seeded, "hello?", TODAY)
     assert r["offline"] is True
 
+
+def test_chat_creates_conversation_titled_from_message(seeded, monkeypatch):
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: "noted.")
+    r = advisor.chat(seeded, "Can I afford a trip to Eilat?", TODAY)
+    cid = r["conversation_id"]
+    assert cid is not None
+    assert r["title"] == "Can I afford a trip to Eilat?"
+    convs = db.list_conversations(seeded)
+    assert len(convs) == 1 and convs[0]["id"] == cid
+    assert convs[0]["title"] == "Can I afford a trip to Eilat?"
+
+
+def test_chat_title_truncates_at_48(seeded, monkeypatch):
+    monkeypatch.setattr(advisor.client, "ask_claude", lambda *a, **k: "ok")
+    text = "x" * 60  # 60 chars
+    r = advisor.chat(seeded, text, TODAY)
+    assert r["title"] == "x" * 48 + "…"
+    assert len(r["title"]) == 49  # 48 + ellipsis
+
+
+def test_chat_continues_same_conversation_with_memory(seeded, monkeypatch):
+    seen = {}
+
+    def fake_ask(user, system=None, timeout_s=0):
+        seen["user"] = user
+        return "second reply"
+
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: "first reply")
+    r1 = advisor.chat(seeded, "my first question", TODAY)
+    cid = r1["conversation_id"]
+    assert r1["title"] is not None
+
+    monkeypatch.setattr(advisor.client, "ask_claude", fake_ask)
+    r2 = advisor.chat(seeded, "my second question", TODAY, conversation_id=cid)
+    # same conversation, no new title on a continuation
+    assert r2["conversation_id"] == cid
+    assert r2["title"] is None
+    # the AI saw the first exchange in this conversation's history
+    assert "my first question" in seen["user"]
+    assert "first reply" in seen["user"]
+    # both turns landed in the one conversation (2 user + 2 assistant)
+    msgs = db.recent_chat(seeded, 50, cid)
+    assert len(msgs) == 4
+    convs = db.list_conversations(seeded)
+    assert len(convs) == 1
+
+
+def test_chat_offline_still_returns_conversation_id(seeded, monkeypatch):
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            client.AIUnavailable("x")))
+    r = advisor.chat(seeded, "anything", TODAY)
+    assert r["offline"] is True
+    assert r["conversation_id"] is not None
+    # the conversation and the user message were still stored
+    convs = db.list_conversations(seeded)
+    assert len(convs) == 1 and convs[0]["id"] == r["conversation_id"]
+    msgs = db.recent_chat(seeded, 50, r["conversation_id"])
+    assert [m["text"] for m in msgs] == ["anything"]
+
 def test_apply_action_create_goal(seeded):
     advisor.apply_action(seeded, {"type": "create_goal", "name": "Trip",
                                   "goal_type": "save_by_date",

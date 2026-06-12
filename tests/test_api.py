@@ -176,6 +176,52 @@ def test_chat_send_offline(api, monkeypatch):
     res = api.chat_send("hello?")
     assert res["ok"] is True and res["offline"] is True
 
+def test_chat_send_returns_conversation_id(api, monkeypatch):
+    from app.ai import advisor as adv
+    monkeypatch.setattr(adv.client, "ask_claude", lambda *a, **k: "sure thing")
+    res = api.chat_send("how am I doing?")
+    assert res["ok"] is True
+    assert res["conversation_id"] is not None
+    assert res["title"] == "how am I doing?"
+
+
+def test_list_chats_shape(api, monkeypatch):
+    from app.ai import advisor as adv
+    monkeypatch.setattr(adv.client, "ask_claude", lambda *a, **k: "ok")
+    cid = api.chat_send("first chat")["conversation_id"]
+    res = api.list_chats()
+    assert res["ok"] is True
+    assert isinstance(res["chats"], list) and len(res["chats"]) == 1
+    row = res["chats"][0]
+    for key in ("id", "title", "created_at", "last_ts", "msg_count"):
+        assert key in row, key
+    assert row["id"] == cid
+
+
+def test_get_chat_history_filters_by_conversation(api, monkeypatch):
+    from app.ai import advisor as adv
+    monkeypatch.setattr(adv.client, "ask_claude", lambda *a, **k: "reply-a")
+    a_id = api.chat_send("alpha")["conversation_id"]
+    monkeypatch.setattr(adv.client, "ask_claude", lambda *a, **k: "reply-b")
+    b_id = api.chat_send("bravo")["conversation_id"]
+    msgs_a = api.get_chat_history(a_id)["messages"]
+    assert [m["text"] for m in msgs_a] == ["alpha", "reply-a"]
+    msgs_b = api.get_chat_history(b_id)["messages"]
+    assert [m["text"] for m in msgs_b] == ["bravo", "reply-b"]
+    # unfiltered still returns everything (back-compat)
+    assert len(api.get_chat_history()["messages"]) == 4
+
+
+def test_delete_chat_removes_conversation_and_messages(api, monkeypatch):
+    from app.ai import advisor as adv
+    monkeypatch.setattr(adv.client, "ask_claude", lambda *a, **k: "ok")
+    cid = api.chat_send("to be deleted")["conversation_id"]
+    res = api.delete_chat(cid)
+    assert res["ok"] is True
+    assert api.list_chats()["chats"] == []
+    assert api.get_chat_history(cid)["messages"] == []
+
+
 def test_startup_smoke(api, monkeypatch):
     from app.ai import client, parser
     monkeypatch.setattr(parser.client, "ask_claude",

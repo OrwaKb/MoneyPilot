@@ -9,6 +9,9 @@ const ready = new Promise((res) => window.addEventListener("pywebviewready", res
 // Fix 4: module-level store for pending advisor action card
 let pendingActionEl = null;
 
+// active advisor conversation; null = fresh chat, not yet created in the DB
+let currentChatId = null;
+
 // Fix 5: module-level briefing cache
 let briefingText = null;
 
@@ -374,12 +377,75 @@ function chatActionCard(action) {
   $("#ch-thread").scrollTop = $("#ch-thread").scrollHeight;
 }
 
+function renderChatList(chats) {
+  const list = $("#ch-list");
+  list.innerHTML = "";
+  for (const c of chats) {
+    const id = Number(c.id);
+    const item = document.createElement("div");
+    item.className = "ch-item" + (id === currentChatId ? " active" : "");
+    item.dataset.id = String(id);
+    // date shown as YYYY-MM-DD slice of the last-activity timestamp
+    const date = esc(String(c.last_ts ?? c.created_at ?? "").slice(0, 10));
+    item.innerHTML =
+      `<span class="ch-meta">
+         <span class="ch-title">${esc(c.title)}</span>
+         <span class="ch-date">${date}</span>
+       </span>
+       <button class="ch-del" title="delete">✕</button>`;
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".ch-del")) return;  // delete handles itself
+      currentChatId = id;
+      pendingActionEl = null;
+      renderers.advisor();
+    });
+    const del = item.querySelector(".ch-del");
+    del.addEventListener("click", () => armDelete(del, id));
+    list.appendChild(item);
+  }
+}
+
+// two-step confirm: first click arms the button for 3s, second click deletes
+function armDelete(btn, id) {
+  if (btn.dataset.armed === "1") {
+    clearTimeout(btn._disarm);
+    deleteChat(id);
+    return;
+  }
+  btn.dataset.armed = "1";
+  btn.classList.add("armed");
+  btn.textContent = "sure?";
+  btn._disarm = setTimeout(() => {
+    btn.dataset.armed = "";
+    btn.classList.remove("armed");
+    btn.textContent = "✕";
+  }, 3000);
+}
+
+async function deleteChat(id) {
+  const res = await api("delete_chat", id);
+  if (!res.ok) { toast(res.error); return; }
+  if (id === currentChatId) currentChatId = null;
+  pendingActionEl = null;
+  renderers.advisor();
+}
+
 renderers.advisor = async function renderAdvisor() {
-  const res = await api("get_chat_history");
-  if (!res.ok) return;
+  const listRes = await api("list_chats");
+  if (!listRes.ok) { toast(listRes.error); return; }
+  const chats = listRes.chats || [];
+  // default to the most recent chat when none is selected yet
+  if (currentChatId === null && chats.length)
+    currentChatId = Number(chats[0].id);
+  renderChatList(chats);
+
   const thread = $("#ch-thread");
   thread.innerHTML = "";
-  for (const m of res.messages) chatBubble(m.role, m.text);
+  if (currentChatId !== null) {
+    const res = await api("get_chat_history", currentChatId);
+    if (!res.ok) { toast(res.error); return; }
+    for (const m of res.messages) chatBubble(m.role, m.text);
+  }
   // Fix 4: re-attach the pending action card after rebuilding the thread
   if (pendingActionEl) thread.appendChild(pendingActionEl);
   if (!thread.childElementCount)
@@ -393,13 +459,22 @@ async function chatSend() {
   input.value = "";
   chatBubble("user", text);
   const thinking = chatBubble("assistant", "…");
-  const res = await api("chat_send", text);
+  const res = await api("chat_send", text, currentChatId);
   thinking.remove();
   if (!res.ok) { toast(res.error); return; }
+  // adopt the conversation the backend created/continued so the sidebar tracks it
+  if (res.conversation_id != null) currentChatId = Number(res.conversation_id);
   chatBubble("assistant", res.text);
   if (res.offline) toast("advisor offline — numbers on Overview are still live");
   if (res.action) chatActionCard(res.action);
+  renderers.advisor();  // refresh sidebar order/title
 }
+
+$("#ch-new").addEventListener("click", () => {
+  currentChatId = null;
+  pendingActionEl = null;
+  renderers.advisor();
+});
 
 $("#ch-send").addEventListener("click", chatSend);
 $("#ch-input").addEventListener("keydown",

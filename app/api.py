@@ -199,9 +199,10 @@ class Api:
             return advisor.get_briefing(self.conn, self._today(), force=force)
 
     @_safe
-    def chat_send(self, text: str):
+    def chat_send(self, text: str, conversation_id=None):
         with self._lock:
-            return advisor.chat(self.conn, text, self._today())
+            return advisor.chat(self.conn, text, self._today(),
+                                conversation_id=conversation_id)
 
     @_safe
     def chat_apply_action(self, action: dict):
@@ -209,8 +210,20 @@ class Api:
             return advisor.apply_action(self.conn, action, self._today())
 
     @_safe
-    def get_chat_history(self):
-        return {"messages": [dict(c) for c in db.recent_chat(self.conn, 50)]}
+    def get_chat_history(self, conversation_id=None):
+        return {"messages": [dict(c)
+                             for c in db.recent_chat(self.conn, 50,
+                                                     conversation_id)]}
+
+    @_safe
+    def list_chats(self):
+        return {"chats": db.list_conversations(self.conn)}
+
+    @_safe
+    def delete_chat(self, conversation_id: int):
+        with self._lock:
+            db.delete_conversation(self.conn, int(conversation_id))
+        return {}
 
     # --- settings & onboarding ------------------------------------------------------
 

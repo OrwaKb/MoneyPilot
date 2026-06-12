@@ -185,6 +185,31 @@ td input, td select { background: var(--bg); color: var(--txt);
   box-shadow: 0 0 14px -6px var(--accent-glow); }
 
 /* --- advisor ----------------------------------------------------------------------- */
+.chat-layout { display: flex; gap: 12px; align-items: stretch; }
+#ch-side { flex: none; width: 200px; display: flex; flex-direction: column;
+  gap: 8px; }
+#ch-new { width: 100%; }
+#ch-list { display: flex; flex-direction: column; gap: 4px;
+  max-height: calc(100vh - 320px); overflow-y: auto; }
+.ch-item { display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel);
+  cursor: pointer; transition: border-color .15s, background .12s; }
+.ch-item:hover { border-color: var(--dim2); }
+.ch-item.active { border-color: var(--accent);
+  box-shadow: 0 0 12px -6px var(--accent-glow);
+  background: linear-gradient(180deg, var(--accent-faint), transparent); }
+.ch-item .ch-meta { flex: 1; min-width: 0; }
+.ch-item .ch-title { display: block; font-size: 12px; color: var(--txt);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-item.active .ch-title { color: var(--accent); }
+.ch-item .ch-date { display: block; font-size: 10.5px; color: var(--dim);
+  letter-spacing: .5px; margin-top: 2px; }
+.ch-item .ch-del { flex: none; background: none; border: none; color: var(--dim);
+  cursor: pointer; font: inherit; font-size: 12px; padding: 0 2px; }
+.ch-item .ch-del:hover { color: var(--red); }
+.ch-item .ch-del.armed { color: var(--red); font-size: 10px;
+  letter-spacing: 1px; }
+.chat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .chat-thread { display: flex; flex-direction: column; gap: 8px;
   max-height: calc(100vh - 290px); overflow-y: auto; padding-bottom: 10px; }
 .bubble { max-width: 72%; padding: 9px 13px; font-size: 13px;
