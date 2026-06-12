@@ -97,3 +97,152 @@ async function submitEntry() {
   }
   await refreshAll();
 })();
+
+/* --- OVERVIEW ------------------------------------------------------------ */
+renderers.overview = async function renderOverview() {
+  const o = await api("get_overview");
+  if (!o.ok) { toast(o.error); return; }
+
+  $("#ov-sts").textContent = o.safe_to_spend.today_fmt;
+  $("#ov-sts-sub").textContent =
+    `${o.safe_to_spend.remaining_fmt} left · ${o.safe_to_spend.days_left} days to salary`;
+  const pct = Math.min(100,
+    Math.round(100 * o.cycle.day_index / o.cycle.length));
+  $("#ov-gauge").style.width = pct + "%";
+  $("#ov-cycle-sub").textContent =
+    `cycle day ${o.cycle.day_index} of ${o.cycle.length}`;
+  $("#cycle-info").textContent =
+    `CYCLE ${o.cycle.start} → ${o.cycle.end}`;
+
+  $("#ov-cats").innerHTML = o.categories
+    .filter((c) => !c.is_fixed)
+    .map((c) => {
+      const unbudgeted = c.pace_ratio === null;
+      const used = c.budget_agorot ?
+        Math.min(100, Math.round(100 * c.spent_agorot / c.budget_agorot)) : 0;
+      const over = c.pace_ratio > 1.1 ? " over" : "";
+      const ubClass = unbudgeted ? " unbudgeted" : "";
+      const amtText = unbudgeted
+        ? `₪${Math.round(c.spent_agorot / 100)} · unbudgeted`
+        : `₪${Math.round(c.spent_agorot / 100)} / ₪${Math.round(c.budget_agorot / 100)}`;
+      return `<div class="catrow${over}${ubClass}">
+        <div class="meta"><span>${esc(c.emoji)} ${esc(c.name)}</span>
+        <span>${amtText}</span></div>
+        <div class="bar"><div class="fill" style="width:${used}%"></div></div>
+      </div>`;
+    }).join("");
+
+  $("#ov-card").textContent = o.card.total_fmt;
+  $("#ov-card-sub").textContent =
+    `charges in ${o.card.days_to_charge}d (${o.card.charge_date})`;
+  $("#ov-balance").innerHTML =
+    `available ${esc(o.balance.available_fmt)}<br>` +
+    `earmarked ₪${Math.round(o.balance.earmarked_agorot / 100)} · ` +
+    `total ${esc(o.balance.total_fmt)}`;
+
+  $("#ov-goals").innerHTML = o.goals.map((g) =>
+    `<div class="catrow"><div class="meta">
+      <span>${esc(g.emoji)} ${esc(g.name)}</span><span>${g.pct}%</span></div>
+      <div class="bar"><div class="fill" style="width:${g.pct}%"></div></div>
+    </div>`).join("") || `<span class="sub">no goals yet — Goals tab</span>`;
+
+  $("#ov-recent").innerHTML = o.recent.map((r) =>
+    `<div class="recent-row"><span>${esc(r.effective_date)} · ${
+      esc(r.category_emoji ?? "")} ${esc(r.description)}</span>
+     <span class="${r.amount_agorot < 0 ? "neg" : "pos"}">${
+      esc(r.amount_fmt)}</span></div>`).join("");
+
+  const b = await api("get_briefing", false);
+  $("#ov-briefing").textContent = b.ok ? b.text : "briefing unavailable";
+};
+
+$("#ov-brief-refresh").addEventListener("click", async () => {
+  $("#ov-briefing").textContent = "…";
+  const b = await api("get_briefing", true);
+  $("#ov-briefing").textContent = b.ok ? b.text : "briefing unavailable";
+});
+
+/* --- LEDGER ---------------------------------------------------------------- */
+let lgCategories = [];
+
+function lgFilters() {
+  return { month: $("#lg-month").value || null,
+           category_id: $("#lg-cat").value || null,
+           text: $("#lg-text").value || null,
+           needs_review: $("#lg-review").checked };
+}
+
+renderers.ledger = async function renderLedger() {
+  const res = await api("list_ledger", lgFilters());
+  if (!res.ok) { toast(res.error); return; }
+  lgCategories = res.categories;
+  const catSel = $("#lg-cat");
+  if (catSel.options.length === 1)
+    for (const c of res.categories)
+      catSel.add(new Option(`${c.emoji} ${c.name}`, c.id));
+  $("#lg-body").innerHTML = res.rows.map((r) => `
+    <tr data-id="${r.id}" class="${r.needs_review ? "review" : ""}">
+      <td>${esc(r.effective_date)}</td>
+      <td>${esc(r.amount_fmt)}</td>
+      <td>${esc(r.category_emoji ?? "")} ${esc(r.category_name ?? "")}</td>
+      <td>${esc(r.description)}${r.people ? " · " + esc(r.people) : ""}</td>
+      <td>${esc(r.payment_method)}</td>
+      <td><button class="rowbtn" data-act="edit">✎</button>
+          <button class="rowbtn" data-act="del">🗑</button></td>
+    </tr>`).join("");
+};
+
+function lgEditRow(tr) {
+  const id = Number(tr.dataset.id);
+  const cells = tr.children;
+  const cur = { date: cells[0].textContent,
+                amount: cells[1].textContent.replace(/[₪,]/g, ""),
+                desc: cells[3].textContent.split(" · ")[0] };
+  const catOpts = lgCategories.map((c) =>
+    `<option value="${c.id}">${esc(c.emoji)} ${esc(c.name)}</option>`).join("");
+  tr.innerHTML = `
+    <td><input type="date" value="${esc(cur.date)}"></td>
+    <td><input type="number" step="0.01" value="${esc(cur.amount)}"></td>
+    <td><select>${catOpts}</select></td>
+    <td><input value="${esc(cur.desc)}"></td>
+    <td></td>
+    <td><button class="rowbtn" data-act="save">✔</button>`;
+  tr.querySelector("[data-act=save]").onclick = async () => {
+    const [d, a, c, t] = tr.querySelectorAll("input, select");
+    const ils = parseFloat(a.value);
+    const res = await api("update_txn", id, {
+      effective_date: d.value,
+      amount_agorot: Math.round(ils * 100),   // sign as displayed (− = expense)
+      category_id: Number(c.value),
+      description: t.value,
+      needs_review: 0,
+    });
+    if (!res.ok) { toast(res.error); return; }
+    toast("saved — category rule learned if you re-categorized");
+    refreshAll();
+  };
+}
+
+$("#lg-body").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button.rowbtn");
+  if (!btn) return;
+  const tr = btn.closest("tr");
+  const id = Number(tr.dataset.id);
+  if (btn.dataset.act === "del") {
+    await api("undo_txn", id);
+    toast("deleted (soft) — restore from a fresh entry chip or DB if needed");
+    refreshAll();
+  } else if (btn.dataset.act === "edit") {
+    lgEditRow(tr);
+  }
+});
+
+for (const id of ["lg-month", "lg-cat", "lg-text", "lg-review"])
+  $("#" + id).addEventListener("change", () => renderers.ledger());
+
+$("#lg-export").addEventListener("click", async () => {
+  const month = $("#lg-month").value ||
+    new Date().toISOString().slice(0, 7);
+  const res = await api("export_csv", month);
+  toast(res.ok ? "exported: " + res.path : res.error);
+});
