@@ -3,6 +3,8 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+from pydantic import ValidationError
+
 from app import db
 from app.ai import client, prompts
 from app.engine import insights
@@ -125,23 +127,44 @@ def apply_action(conn, action: dict, today: dt.date) -> dict:
     raise ValueError(f"unknown action type {kind!r}")
 
 
-def onboarding_propose(conn, braindump: str, today: dt.date) -> dict:
+def onboarding_propose(conn, braindump: str, today: dt.date,
+                       profile: dict | None = None) -> dict:
+    """`profile` carries the wizard's not-yet-saved salary fields — settings
+    are only written at confirm, so without it Claude would see SALARY: 0."""
+    profile = profile or {}
     cats = ", ".join(c["name"] for c in db.categories(conn) if not c["is_income"])
-    salary = int(db.get_setting(conn, "salary_amount_agorot", "0")) // 100
+    try:
+        salary = int(str(profile.get("salary_amount_agorot")
+                         or db.get_setting(conn, "salary_amount_agorot", "0"))) // 100
+    except ValueError:
+        salary = 0
+    salary_day = str(profile.get("salary_day")
+                     or db.get_setting(conn, "salary_day", "1"))
     user = prompts.ONBOARD_USER_TMPL.format(
         today=today.isoformat(), categories=cats, salary=salary,
-        salary_day=db.get_setting(conn, "salary_day", "1"), text=braindump)
+        salary_day=salary_day, text=braindump)
     reply = client.ask_claude(user, system=prompts.ONBOARD_SYSTEM, timeout_s=90)
-    proposal = client.extract_json(reply, opener="{")
-    # validate transactions now so confirm can't fail later; clamp any
-    # today-or-future date to yesterday (opening balance already reflects today)
-    txns = []
-    for t in proposal.get("transactions", []):
-        p = ParsedTxn(**t)
-        if p.effective_date >= today:
-            p = p.model_copy(update={
-                "effective_date": today - dt.timedelta(days=1)})
-        txns.append(p.model_dump(mode="json"))
+    # validate transactions now so confirm can't fail later; one repair retry
+    # (mirrors the parser pipeline — real replies are often schema-adjacent);
+    # clamp today-or-future dates to yesterday (opening balance reflects today)
+    for attempt in range(2):
+        try:
+            proposal = client.extract_json(reply, opener="{")
+            txns = []
+            for t in proposal.get("transactions", []):
+                p = ParsedTxn(**t)
+                if p.effective_date >= today:
+                    p = p.model_copy(update={
+                        "effective_date": today - dt.timedelta(days=1)})
+                txns.append(p.model_dump(mode="json"))
+            break
+        except (ValueError, ValidationError, TypeError) as e:
+            if attempt == 1:
+                raise
+            reply = client.ask_claude(
+                prompts.REPAIR_TMPL.format(error=str(e)[:300],
+                                           previous=reply[:2000]),
+                system=prompts.ONBOARD_SYSTEM, timeout_s=90)
     proposal["transactions"] = txns
     budgets = {}
     for cat, ils in (proposal.get("suggested_budgets") or {}).items():

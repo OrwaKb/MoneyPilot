@@ -64,3 +64,30 @@ def test_to_agorot_junk_raises_valueerror():
 
 def test_fmt_ils_negative_cents():
     assert fmt_ils(-50) == "-₪0.50"
+
+def test_parsed_txn_absorbs_ai_null_noise():
+    # Real Claude replies use null/[] for fields they have no info for;
+    # nulls must fall back to the field defaults instead of erroring.
+    p = ParsedTxn(effective_date=dt.date(2026, 6, 12), amount=45,
+                  currency=None, category=None, description=None,
+                  merchant=None, people=[], payment_method=None,
+                  goal_name=None, confidence=None)
+    assert p.payment_method == "card" and p.category == "Other"
+    assert p.currency == "ILS" and p.description == ""
+    assert p.people is None and p.confidence == 1.0
+
+def test_parsed_txn_joins_people_list():
+    p = ParsedTxn(effective_date=dt.date(2026, 6, 12), amount=45,
+                  people=["karim", "sara"])
+    assert p.people == "karim, sara"
+
+def test_parsed_txn_normalizes_enum_case():
+    p = ParsedTxn(effective_date=dt.date(2026, 6, 12), amount=45,
+                  direction="Expense", payment_method="CARD")
+    assert p.direction == "expense" and p.payment_method == "card"
+
+def test_parsed_txn_still_rejects_missing_required():
+    with pytest.raises(ValidationError):
+        ParsedTxn(effective_date=None, amount=45)  # date stays required
+    with pytest.raises(ValidationError):
+        ParsedTxn(effective_date=dt.date(2026, 6, 12), amount=None)

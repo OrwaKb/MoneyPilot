@@ -4,7 +4,7 @@ import datetime as dt
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Direction = Literal["expense", "income", "goal_contribution"]
 PayMethod = Literal["card", "cash", "transfer"]
@@ -42,6 +42,23 @@ class ParsedTxn(BaseModel):
     payment_method: PayMethod = "card"
     goal_name: Optional[str] = None
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _absorb_ai_noise(cls, data):
+        """Real AI replies use null/[] for fields they have no info for.
+        Drop nulls so field defaults apply (except the required core fields,
+        where null must still error), and flatten a people list to a string."""
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items()
+                    if v is not None or k in ("effective_date", "amount")}
+            people = data.get("people")
+            if isinstance(people, list):
+                data["people"] = ", ".join(str(x) for x in people) or None
+            for k in ("direction", "payment_method"):
+                if isinstance(data.get(k), str):
+                    data[k] = data[k].strip().lower()
+        return data
 
     @field_validator("currency")
     @classmethod

@@ -30,7 +30,7 @@ TEXT:
 {text}"""
 
 REPAIR_TMPL = """Your previous reply could not be used: {error}
-Reply again with ONLY the corrected JSON array, nothing else.
+Reply again with ONLY the corrected JSON (same shape as before), nothing else.
 Previous reply:
 {previous}"""
 

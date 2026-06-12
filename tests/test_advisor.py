@@ -160,6 +160,58 @@ def test_onboarding_sanitizes_suggested_budgets(seeded, monkeypatch):
     p = advisor.onboarding_propose(seeded, "stuff", TODAY)
     assert p["suggested_budgets"] == {"Food out": 600}
 
+def test_onboarding_propose_survives_real_world_nulls(seeded, monkeypatch):
+    # Shape captured from a REAL Claude onboarding reply (2026-06-12 bug):
+    # people=[] and payment_method=null crashed validation -> blank slate.
+    proposal = {"opening_balance_ils": 5000,
+                "transactions": [{"effective_date": "2026-06-05", "amount": 800,
+                                  "currency": "ILS", "direction": "expense",
+                                  "category": "Groceries",
+                                  "description": "groceries so far",
+                                  "merchant": None, "people": [],
+                                  "payment_method": None, "goal_name": None,
+                                  "confidence": 0.8}],
+                "suggested_budgets": {"Groceries": 1200}}
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: json.dumps(proposal))
+    p = advisor.onboarding_propose(seeded, "I have 5000, spent 800", TODAY)
+    assert p["opening_balance_ils"] == 5000
+    assert p["transactions"][0]["payment_method"] == "card"
+    assert p["transactions"][0]["people"] is None
+
+def test_onboarding_propose_repairs_bad_reply(seeded, monkeypatch):
+    # Real Claude once replied direction:"out" — one repair retry must fix it,
+    # mirroring the parser pipeline's repair loop.
+    bad = {"opening_balance_ils": 5000,
+           "transactions": [{"effective_date": "2026-06-05", "amount": 800,
+                             "currency": "ILS", "direction": "out",
+                             "category": "Groceries", "description": "x",
+                             "merchant": None, "people": None,
+                             "payment_method": "card", "goal_name": None,
+                             "confidence": 0.8}],
+           "suggested_budgets": {}}
+    good = json.loads(json.dumps(bad))
+    good["transactions"][0]["direction"] = "expense"
+    replies = iter([json.dumps(bad), json.dumps(good)])
+    calls = []
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: calls.append(1) or next(replies))
+    p = advisor.onboarding_propose(seeded, "dump", TODAY)
+    assert len(calls) == 2
+    assert p["transactions"][0]["direction"] == "expense"
+
+def test_onboarding_propose_uses_wizard_profile(seeded, monkeypatch):
+    seen = {}
+    def fake_ask(user, system=None, timeout_s=0):
+        seen["user"] = user
+        return json.dumps({"opening_balance_ils": 0, "transactions": [],
+                           "suggested_budgets": {}})
+    monkeypatch.setattr(advisor.client, "ask_claude", fake_ask)
+    advisor.onboarding_propose(seeded, "dump", TODAY,
+                               profile={"salary_amount_agorot": "1230000",
+                                        "salary_day": "7"})
+    assert "SALARY: 12300 ILS on day 7" in seen["user"]
+
 def test_chat_strips_every_action_fence(seeded, monkeypatch):
     reply = ('One.\n```action\n{"type": "update_budget", "category": "Fun",'
              ' "amount_ils": 100}\n```\nTwo.\n```action\n'

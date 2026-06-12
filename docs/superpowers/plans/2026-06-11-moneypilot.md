@@ -207,6 +207,20 @@ Conventions: dates stored as ISO strings; `amount_agorot` signed (income +, expe
 > method, manual FX-rate override (also noted at Task 9), onboarding Back
 > button.
 
+> **Amendments (field bug, first real onboarding 2026-06-12):** the live
+> braindump crashed to the blank-slate proposal: real Claude replies are
+> schema-adjacent (`people: []`, `payment_method: null`, `direction: "out"`)
+> and `onboarding_propose` validated one-shot with no retry. Fixes:
+> `ParsedTxn` absorbs AI noise in a before-validator (nulls fall back to
+> defaults — required `effective_date`/`amount` still error; people lists
+> join to a string; direction/payment_method case-normalized), and
+> `onboarding_propose` gained the parser pipeline's one-repair-retry loop
+> (REPAIR_TMPL wording generalized from "array" to "same shape as before").
+> Also fixed: the braindump prompt saw `SALARY: 0` because wizard values are
+> only saved at confirm — the UI now passes `{salary_amount_agorot,
+> salary_day}` through `onboarding_braindump` → `onboarding_propose(profile=)`.
+> Reproduced and verified against real Claude end-to-end.
+
 ---
 
 ### Task 1: Project scaffolding & test harness

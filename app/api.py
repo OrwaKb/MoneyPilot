@@ -239,9 +239,10 @@ class Api:
         return {}
 
     @_safe
-    def onboarding_braindump(self, text: str):
+    def onboarding_braindump(self, text: str, profile: dict | None = None):
         return {"proposal": advisor.onboarding_propose(self.conn, text,
-                                                       self._today())}
+                                                       self._today(),
+                                                       profile=profile)}
 
     @_safe
     def onboarding_complete(self, profile: dict, proposal: dict):

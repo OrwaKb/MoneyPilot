@@ -423,7 +423,11 @@ window.startOnboarding = function startOnboarding() {
     if (step < 3) { show(step + 1); return; }
     if (step === 3) {
       $("#ob-status").textContent = "Claude is reading your dump…";
-      const res = await api("onboarding_braindump", $("#ob-dump").value);
+      const res = await api("onboarding_braindump", $("#ob-dump").value, {
+        salary_amount_agorot: String(
+          Math.round((parseFloat($("#ob-salary").value) || 0) * 100)),
+        salary_day: $("#ob-salary-day").value || "1",
+      });
       $("#ob-status").textContent = "";
       if (!res.ok) {
         toast("AI unreachable — starting with a blank slate. " + res.error);
