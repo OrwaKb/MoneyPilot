@@ -206,7 +206,7 @@ function lgEditRow(tr) {
     <td><select>${catOpts}</select></td>
     <td><input value="${esc(cur.desc)}"></td>
     <td></td>
-    <td><button class="rowbtn" data-act="save">✔</button>`;
+    <td><button class="rowbtn" data-act="save">✔</button></td>`;
   tr.querySelector("[data-act=save]").onclick = async () => {
     const [d, a, c, t] = tr.querySelectorAll("input, select");
     const ils = parseFloat(a.value);
