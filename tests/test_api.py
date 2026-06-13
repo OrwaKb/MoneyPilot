@@ -142,6 +142,62 @@ def test_onboarding_rejects_bad_day_without_writing(api):
     assert res["ok"] is False and "1..31" in res["error"]
     assert db.get_setting(api.conn, "user_name") == "Tester"  # nothing written
 
+def _txn(amount, *, date="2026-06-05", cat="Groceries", desc="month so far"):
+    return {"effective_date": date, "amount": amount, "currency": "ILS",
+            "direction": "expense", "category": cat, "description": desc,
+            "merchant": None, "people": None, "payment_method": "card",
+            "goal_name": None, "confidence": 0.8}
+
+def test_onboarding_rejects_fractional_transaction_without_writing(api):
+    res = api.onboarding_complete(
+        {"user_name": "X", "salary_day": "10",
+         "salary_amount_agorot": "900000", "card_charge_day": "2"},
+        {"opening_balance_ils": 1000, "transactions": [_txn(47.9)],
+         "suggested_budgets": {}})
+    assert res["ok"] is False
+    assert db.list_transactions(api.conn) == []                 # nothing written
+    assert db.get_setting(api.conn, "opening_balance_agorot") == "500000"
+
+def test_onboarding_rejects_fractional_budget_without_writing(api):
+    res = api.onboarding_complete(
+        {"user_name": "X", "salary_day": "10",
+         "salary_amount_agorot": "900000", "card_charge_day": "2"},
+        {"opening_balance_ils": 1000, "transactions": [],
+         "suggested_budgets": {"Groceries": 1200.5}})
+    assert res["ok"] is False
+    groceries = db.category_id_by_name(api.conn, "Groceries")
+    assert groceries not in db.get_budgets(api.conn)             # nothing written
+
+def test_onboarding_rejects_zero_budget_without_writing(api):
+    # was silently dropped (ok=True) — now an explicit, all-or-nothing failure
+    res = api.onboarding_complete(
+        {"user_name": "X", "salary_day": "10",
+         "salary_amount_agorot": "900000", "card_charge_day": "2"},
+        {"opening_balance_ils": 1000, "transactions": [],
+         "suggested_budgets": {"Groceries": 0}})
+    assert res["ok"] is False
+    assert db.get_setting(api.conn, "opening_balance_agorot") == "500000"
+
+def test_onboarding_rejects_fractional_opening_balance_without_writing(api):
+    res = api.onboarding_complete(
+        {"user_name": "X", "salary_day": "10",
+         "salary_amount_agorot": "900000", "card_charge_day": "2"},
+        {"opening_balance_ils": 999.6, "transactions": [],
+         "suggested_budgets": {}})
+    assert res["ok"] is False
+    assert db.get_setting(api.conn, "opening_balance_agorot") == "500000"
+
+def test_onboarding_allows_zero_opening_balance(api):
+    # "I'm broke right now" is valid: 0 opening balance must onboard cleanly
+    res = api.onboarding_complete(
+        {"user_name": "Broke", "salary_day": "10",
+         "salary_amount_agorot": "900000", "card_charge_day": "2"},
+        {"opening_balance_ils": 0, "transactions": [_txn(800)],
+         "suggested_budgets": {"Groceries": 1200}})
+    assert res["ok"] is True
+    assert db.get_setting(api.conn, "opening_balance_agorot") == "0"
+    assert len(db.list_transactions(api.conn)) == 1
+
 def test_recategorize_to_income_does_not_learn_rule(api, monkeypatch):
     from app.ai import parser
     monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: GOOD_REPLY)

@@ -66,6 +66,20 @@ function esc(s) {
               "'": "&#39;" }[c]));
 }
 
+// First Flight money fields are whole shekels only. Returns one of:
+//   { n }       a valid whole-shekel amount (>0, or >=0 when allowZero)
+//   { empty }   blank — caller decides (drop the row, or default to 0)
+//   { bad }     present but not a whole number in range (0, float, negative…)
+function parseShekels(raw, { allowZero = false } = {}) {
+  const s = String(raw ?? "").trim();
+  if (s === "") return { empty: true };
+  if (!/^\d+$/.test(s)) return { bad: true };   // plain digits only: no . - e
+  const n = Number(s);
+  if (!Number.isInteger(n) || n < 0) return { bad: true };
+  if (n === 0 && !allowZero) return { bad: true };
+  return { n };
+}
+
 // dim gauge glyph + one quiet line, for zero-row renders (presentational)
 function emptyState(msg) {
   return `<div class="empty-state">
@@ -662,21 +676,38 @@ window.startOnboarding = function startOnboarding() {
         // Fix 1: coerce ils
         `<div class="prow">${esc(name)} ₪
           <input data-pb="${esc(name)}" value="${Number(ils) || 0}"></div>`),
+      `<div class="prow ob-hint">whole shekels only · clear a line to drop it</div>`,
     ];
     $("#ob-proposal").innerHTML = rows.join("");
   }
 
+  function obStatus(msg, isErr = false) {
+    const el = $("#ob-status");
+    el.textContent = msg;
+    el.classList.toggle("err", isErr && !!msg);
+  }
+
   $("#ob-next").onclick = async () => {
     if (step === 0 && !$("#ob-name").value.trim()) return;
+    if (step === 1) {                          // salary must be a positive int
+      const salary = parseShekels($("#ob-salary").value);
+      if (!salary.n) {                         // empty, 0, fraction or negative
+        $("#ob-salary").classList.add("bad");
+        obStatus("Salary must be a whole number of shekels above 0.", true);
+        return;
+      }
+      $("#ob-salary").classList.remove("bad");
+      obStatus("");
+    }
     if (step < 3) { show(step + 1); return; }
     if (step === 3) {
-      $("#ob-status").textContent = "Claude is reading your dump…";
+      obStatus("Claude is reading your dump…");
       const res = await api("onboarding_braindump", $("#ob-dump").value, {
         salary_amount_agorot: String(
           Math.round((parseFloat($("#ob-salary").value) || 0) * 100)),
         salary_day: $("#ob-salary-day").value || "1",
       });
-      $("#ob-status").textContent = "";
+      obStatus("");
       if (!res.ok) {
         toast("AI unreachable — starting with a blank slate. " + res.error);
         proposal = { opening_balance_ils: 0, transactions: [],
@@ -688,20 +719,57 @@ window.startOnboarding = function startOnboarding() {
       show(4);
       return;
     }
-    // step 4 → confirm
-    // Fix 3: build fresh copies each attempt so proposal is never mutated;
-    // a server-side failure followed by a retry no longer crashes.
-    const opening = parseFloat($("#obp-balance").value) || 0;
+    // step 4 → confirm. First Flight is whole shekels only: 0 and fractions
+    // are rejected with a clear message; a blank line is treated as "drop it".
+    // Fix 3: build fresh copies each attempt so a server-side failure + retry
+    // never mutates `proposal`.
+    const errs = [];
+    let opening = 0;
+    const ob = parseShekels($("#obp-balance").value, { allowZero: true });
+    if (ob.bad) {
+      errs.push("opening balance must be a whole number (0 is fine)");
+      $("#obp-balance").classList.add("bad");
+    } else {
+      $("#obp-balance").classList.remove("bad");
+      opening = ob.n ?? 0;                     // blank balance → 0
+    }
     const txns = [];
     $$("#ob-proposal [data-pi]").forEach((inp) => {
       const t = { ...proposal.transactions[Number(inp.dataset.pi)] };
-      t.amount = parseFloat(inp.value) || 0;
-      if (t.amount > 0) txns.push(t);
+      const r = parseShekels(inp.value);
+      if (r.bad) {
+        errs.push(`"${t.description || t.category || "a line"}" must be a `
+          + "whole number above 0 (or clear it to drop)");
+        inp.classList.add("bad");
+      } else if (r.n) {                        // valid amount → keep
+        inp.classList.remove("bad");
+        t.amount = r.n;
+        txns.push(t);
+      } else {
+        inp.classList.remove("bad");           // blank → drop this row
+      }
     });
     const budgets = {};
     $$("#ob-proposal [data-pb]").forEach((inp) => {
-      budgets[inp.dataset.pb] = parseFloat(inp.value) || 0;
+      const r = parseShekels(inp.value);
+      if (r.bad) {
+        errs.push(`${inp.dataset.pb} budget must be a whole number above 0 `
+          + "(or clear it to drop)");
+        inp.classList.add("bad");
+      } else if (r.n) {
+        inp.classList.remove("bad");
+        budgets[inp.dataset.pb] = r.n;
+      } else {
+        inp.classList.remove("bad");           // blank → drop this budget
+      }
     });
+    if (errs.length) {
+      obStatus(errs.length === 1 ? errs[0]
+        : `${errs.length} values need fixing — ${errs[0]}`, true);
+      toast(errs[0]);
+      return;
+    }
+    obStatus("");
     const res = await api("onboarding_complete", {
       user_name: $("#ob-name").value.trim(),
       salary_day: $("#ob-salary-day").value || "1",

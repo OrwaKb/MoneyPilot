@@ -32,7 +32,8 @@
       </div>
       <div class="ob-step hidden" data-step="1">
         <label>Monthly salary (₪) and the day it lands</label>
-        <input id="ob-salary" class="ob-input" type="number" placeholder="9000">
+        <input id="ob-salary" class="ob-input" type="number" min="1" step="1"
+               inputmode="numeric" placeholder="9000">
         <input id="ob-salary-day" class="ob-input" type="number" min="1" max="31"
                placeholder="day it lands, e.g. 10">
       </div>

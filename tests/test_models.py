@@ -3,7 +3,7 @@ import datetime as dt
 import pytest
 from pydantic import ValidationError
 
-from app.models import ParsedTxn, fmt_ils, to_agorot
+from app.models import ParsedTxn, fmt_ils, to_agorot, to_whole_agorot
 
 
 def test_to_agorot_int():
@@ -91,3 +91,45 @@ def test_parsed_txn_still_rejects_missing_required():
         ParsedTxn(effective_date=None, amount=45)  # date stays required
     with pytest.raises(ValidationError):
         ParsedTxn(effective_date=dt.date(2026, 6, 12), amount=None)
+
+
+# --- to_whole_agorot: First Flight amounts are whole shekels only -------------------
+
+def test_to_whole_agorot_int():
+    assert to_whole_agorot(12) == 1200
+
+def test_to_whole_agorot_accepts_whole_float_and_str():
+    assert to_whole_agorot(12.0) == 1200
+    assert to_whole_agorot("12") == 1200
+    assert to_whole_agorot("  12  ") == 1200
+
+def test_to_whole_agorot_rejects_fraction():
+    with pytest.raises(ValueError):
+        to_whole_agorot(12.5)
+    with pytest.raises(ValueError):
+        to_whole_agorot("47.9")
+
+def test_to_whole_agorot_rejects_zero_by_default():
+    with pytest.raises(ValueError):
+        to_whole_agorot(0)
+
+def test_to_whole_agorot_allows_zero_when_opted_in():
+    assert to_whole_agorot(0, allow_zero=True) == 0
+
+def test_to_whole_agorot_rejects_negative_even_when_zero_allowed():
+    with pytest.raises(ValueError):
+        to_whole_agorot(-3)
+    with pytest.raises(ValueError):
+        to_whole_agorot(-3, allow_zero=True)
+
+def test_to_whole_agorot_rejects_blank_and_junk():
+    with pytest.raises(ValueError):
+        to_whole_agorot("")
+    with pytest.raises(ValueError):
+        to_whole_agorot(None)
+    with pytest.raises(ValueError):
+        to_whole_agorot("nine")
+
+def test_to_whole_agorot_rejects_non_finite():
+    with pytest.raises(ValueError):
+        to_whole_agorot(float("inf"))

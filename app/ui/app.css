@@ -413,6 +413,12 @@ td input, td select { background: var(--bg); color: var(--txt);
 .ob-dot.cur { background: var(--accent);
   box-shadow: 0 0 8px var(--accent-glow); }
 #ob-status { flex: 1; text-align: right; }
+#ob-status.err { color: var(--red); }
+/* a field flagged by First Flight validation (0, fraction, blank salary…) */
+.ob-input.bad, .ob-proposal input.bad { border-color: var(--red);
+  box-shadow: 0 0 10px -4px rgba(255, 107, 122, .55); }
+.ob-proposal .ob-hint { color: var(--dim2); font-size: 11px;
+  opacity: .7; padding-top: 6px; }
 /* the CONFIRM button breathes once it is reachable */
 #ob-next.confirm { animation: readyGlow 2s ease-in-out infinite; }
 @keyframes readyGlow {

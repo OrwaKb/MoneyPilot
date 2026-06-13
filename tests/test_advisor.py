@@ -167,6 +167,57 @@ def test_onboarding_propose(seeded, monkeypatch):
     assert p["suggested_budgets"]["Groceries"] == 1200
 
 
+def test_onboarding_propose_rounds_transaction_to_whole_shekels(seeded, monkeypatch):
+    # First Flight uses whole shekels, so a fractional AI amount must be
+    # rounded in the proposal — otherwise confirming it unedited would fail.
+    proposal = {"opening_balance_ils": 5000,
+                "transactions": [{"effective_date": "2026-06-05", "amount": 47.9,
+                                  "currency": "ILS", "direction": "expense",
+                                  "category": "Groceries", "description": "x",
+                                  "merchant": None, "people": None,
+                                  "payment_method": "card", "goal_name": None,
+                                  "confidence": 0.8}],
+                "suggested_budgets": {}}
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: json.dumps(proposal))
+    p = advisor.onboarding_propose(seeded, "x", TODAY)
+    amt = p["transactions"][0]["amount"]
+    assert amt == 48 and amt == int(amt)
+
+def test_onboarding_propose_drops_negligible_transaction(seeded, monkeypatch):
+    # an amount that rounds to 0 can't be a valid (>0) transaction — drop it
+    proposal = {"opening_balance_ils": 5000,
+                "transactions": [{"effective_date": "2026-06-05", "amount": 0.3,
+                                  "currency": "ILS", "direction": "expense",
+                                  "category": "Groceries", "description": "x",
+                                  "merchant": None, "people": None,
+                                  "payment_method": "card", "goal_name": None,
+                                  "confidence": 0.8}],
+                "suggested_budgets": {}}
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: json.dumps(proposal))
+    p = advisor.onboarding_propose(seeded, "x", TODAY)
+    assert p["transactions"] == []
+
+def test_onboarding_propose_drops_sub_shekel_budget(seeded, monkeypatch):
+    # a sub-1-shekel AI budget rounds to 0; drop it (like the txn path) rather
+    # than emit a 0 the confirm step would then reject as invalid.
+    proposal = {"opening_balance_ils": 5000, "transactions": [],
+                "suggested_budgets": {"Food out": 0.5, "Groceries": 1200}}
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: json.dumps(proposal))
+    p = advisor.onboarding_propose(seeded, "x", TODAY)
+    assert p["suggested_budgets"] == {"Groceries": 1200}
+
+def test_onboarding_propose_rounds_opening_balance(seeded, monkeypatch):
+    proposal = {"opening_balance_ils": 4999.6, "transactions": [],
+                "suggested_budgets": {}}
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: json.dumps(proposal))
+    p = advisor.onboarding_propose(seeded, "x", TODAY)
+    assert p["opening_balance_ils"] == 5000
+    assert p["opening_balance_ils"] == int(p["opening_balance_ils"])
+
 def test_apply_action_validates_day_settings(seeded):
     import pytest
     with pytest.raises(ValueError):

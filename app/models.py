@@ -22,6 +22,29 @@ def to_agorot(amount) -> int:
         raise ValueError(f"not a money amount: {amount!r}") from e
 
 
+def to_whole_agorot(amount, *, allow_zero: bool = False,
+                    label: str = "amount") -> int:
+    """First Flight money: whole shekels only → integer agorot.
+
+    Rejects fractions, blanks, junk and non-finite values; rejects 0 unless
+    ``allow_zero`` (the opening balance may legitimately be 0). Raises
+    ValueError with a human-readable message on anything else."""
+    try:
+        shekels = Decimal(str(amount).strip())
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError(f"{label} must be a whole number of shekels")
+    if not shekels.is_finite():
+        raise ValueError(f"{label} must be a real number")
+    if shekels != shekels.to_integral_value():
+        raise ValueError(f"{label} can't be a fraction — use whole shekels")
+    n = int(shekels)
+    if n < 0:
+        raise ValueError(f"{label} can't be negative")
+    if n == 0 and not allow_zero:
+        raise ValueError(f"{label} must be greater than 0")
+    return n * 100
+
+
 def fmt_ils(agorot: int) -> str:
     sign = "-" if agorot < 0 else ""
     shekels, ag = divmod(abs(agorot), 100)

@@ -177,6 +177,12 @@ def onboarding_propose(conn, braindump: str, today: dt.date,
             txns = []
             for t in proposal.get("transactions", []):
                 p = ParsedTxn(**t)
+                # First Flight uses whole shekels — round so the proposal the
+                # user confirms can't fail validation; drop what rounds to 0.
+                amt = round(p.amount)
+                if amt < 1:
+                    continue
+                p = p.model_copy(update={"amount": float(amt)})
                 if p.effective_date >= today:
                     p = p.model_copy(update={
                         "effective_date": today - dt.timedelta(days=1)})
@@ -198,7 +204,14 @@ def onboarding_propose(conn, braindump: str, today: dt.date,
             agorot = to_agorot(ils)
         except ValueError:
             continue  # non-numeric — drop
-        if agorot > 0:
-            budgets[str(cat)] = round(agorot / 100)
+        whole = round(agorot / 100)            # whole shekels, like the txns
+        if whole >= 1:                         # drop sub-1, never emit a 0
+            budgets[str(cat)] = whole
     proposal["suggested_budgets"] = budgets
+    # opening balance is also whole shekels in First Flight (0 is allowed)
+    try:
+        ob = round(float(proposal.get("opening_balance_ils") or 0))
+    except (TypeError, ValueError):
+        ob = 0
+    proposal["opening_balance_ils"] = max(ob, 0)
     return proposal

@@ -10,7 +10,7 @@ from pathlib import Path
 from app import db
 from app.ai import advisor, parser
 from app.engine import budget, goals as goals_eng, insights
-from app.models import fmt_ils, to_agorot
+from app.models import fmt_ils, to_agorot, to_whole_agorot
 
 ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
                 "card_charge_day")
@@ -281,16 +281,21 @@ class Api:
                                      " integer (agorot = shekels x 100)")
                 v = str(int(v))
             profile_clean[k] = v
-        ob_agorot = to_agorot(proposal.get("opening_balance_ils") or 0)
-        txns = [ParsedTxn(**t) for t in proposal.get("transactions", [])]
+        # First Flight amounts are whole shekels only: reject fractions and
+        # zeros (the opening balance may be 0 — "I'm broke" is valid).
+        ob_agorot = to_whole_agorot(proposal.get("opening_balance_ils") or 0,
+                                    allow_zero=True, label="opening balance")
+        txns = []
+        for t in proposal.get("transactions", []):
+            desc = (t or {}).get("description") or (t or {}).get("category") \
+                or "transaction"
+            to_whole_agorot((t or {}).get("amount"), label=f"the '{desc}' amount")
+            txns.append(ParsedTxn(**t))
         budgets = []
         for name, ils in (proposal.get("suggested_budgets") or {}).items():
+            agorot = to_whole_agorot(ils, label=f"the {name} budget")
             cid = db.category_id_by_name(self.conn, str(name))
-            try:
-                agorot = to_agorot(ils)
-            except ValueError:
-                continue
-            if cid and agorot > 0:
+            if cid:
                 budgets.append((cid, agorot))
         with self._lock:
             for k, v in profile_clean.items():
