@@ -167,3 +167,24 @@ def test_export_csv_requires_auth(tmp_path):
     with TestClient(_make_app(tmp_path)) as c:
         r = c.get("/api/export_csv?month=2026-06", follow_redirects=False)
         assert r.status_code == 303
+
+
+def test_login_throttle_unit():
+    from web.server import LoginThrottle
+    clock = {"t": 0.0}
+    th = LoginThrottle(max_fails=3, window_s=100, now_fn=lambda: clock["t"])
+    for _ in range(3):
+        assert not th.blocked("1.2.3.4")
+        th.record_fail("1.2.3.4")
+    assert th.blocked("1.2.3.4")
+    clock["t"] = 101.0                     # window elapsed
+    assert not th.blocked("1.2.3.4")
+
+
+def test_login_throttle_integration(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        for _ in range(5):
+            _login(c, "alice", "WRONG")
+        r = _login(c, "alice", "pw1")      # correct, but should be blocked now
+        assert "throttled" in r.headers["location"]
+        assert c.post("/api/get_overview", json=[]).status_code == 401

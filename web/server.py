@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -28,12 +29,38 @@ ALLOWED = {
 }
 
 
+class LoginThrottle:
+    """In-memory per-IP failure counter. Fine for a 2-3 user app."""
+
+    def __init__(self, *, max_fails=5, window_s=300, now_fn=time.monotonic):
+        self.max_fails = max_fails
+        self.window_s = window_s
+        self.now = now_fn
+        self._fails: dict[str, list[float]] = {}
+
+    def _recent(self, ip):
+        cutoff = self.now() - self.window_s
+        ts = [t for t in self._fails.get(ip, []) if t >= cutoff]
+        self._fails[ip] = ts
+        return ts
+
+    def blocked(self, ip):
+        return len(self._recent(ip)) >= self.max_fails
+
+    def record_fail(self, ip):
+        self._recent(ip).append(self.now())
+
+    def reset(self, ip):
+        self._fails.pop(ip, None)
+
+
 def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
     app = FastAPI()
     app.add_middleware(SessionMiddleware, secret_key=secret_key,
                        https_only=True, same_site="lax")
     store = UserStore(users_path)
     registry = Registry(base_dir)
+    throttle = LoginThrottle()
 
     @app.get("/")
     def root(request: Request):
@@ -47,12 +74,17 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
 
     @app.post("/login")
     async def login(request: Request):
+        ip = request.client.host if request.client else "?"
+        if throttle.blocked(ip):
+            return RedirectResponse("/login?error=throttled", status_code=303)
         form = await request.form()
         username = (form.get("username") or "").strip()
         password = form.get("password") or ""
         if store.verify(username, password):
+            throttle.reset(ip)
             request.session["user"] = username
             return RedirectResponse("/", status_code=303)
+        throttle.record_fail(ip)
         return RedirectResponse("/login?error=1", status_code=303)
 
     @app.post("/logout")
