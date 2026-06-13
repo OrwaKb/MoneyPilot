@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MoneyPilot — sign in</title>
+<link rel="icon" type="image/png" href="assets/favicon-32.png">
+<style>
+  :root { --bg:#0d1117; --panel:#141b26; --accent:#4ef0c0; --line:#26334a;
+          --text:#e6edf3; --muted:#8b97a7; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center;
+         justify-content:center; background:var(--bg); color:var(--text);
+         font-family:'Segoe UI',system-ui,sans-serif; }
+  .card { background:var(--panel); border:1px solid var(--line);
+          border-radius:14px; padding:32px 28px; width:300px;
+          box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  h1 { font-size:20px; margin:0 0 4px; letter-spacing:.5px; }
+  p.sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:12px 0 4px; }
+  input { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line);
+          background:#0d1420; color:var(--text); font-size:14px; }
+  input:focus { outline:none; border-color:var(--accent); }
+  button { width:100%; margin-top:20px; padding:11px; border:none;
+           border-radius:8px; background:var(--accent); color:#06231c;
+           font-weight:600; font-size:14px; cursor:pointer; }
+  .err { display:none; margin-top:14px; color:#ff8c8c; font-size:13px; }
+</style>
+</head>
+<body>
+  <form class="card" method="post" action="/login">
+    <h1>🧭 MoneyPilot</h1>
+    <p class="sub">Sign in to your ledger</p>
+    <label for="u">Username</label>
+    <input id="u" name="username" autocomplete="username" autofocus required>
+    <label for="p">Password</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+    <div class="err" id="err">Incorrect username or password.</div>
+  </form>
+  <script>
+    if (new URLSearchParams(location.search).has("error")) {
+      document.getElementById("err").style.display = "block";
+    }
+  </script>
+</body>
+</html>
