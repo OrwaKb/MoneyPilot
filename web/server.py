@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import (FileResponse, JSONResponse, RedirectResponse)
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse)
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
@@ -30,7 +31,11 @@ ALLOWED = {
 
 
 class LoginThrottle:
-    """In-memory per-IP failure counter. Fine for a 2-3 user app."""
+    """In-memory per-username failed-login counter. Fine for a 2-3 user app.
+    Keyed by username (not IP) because behind the Cloudflare tunnel every
+    request arrives from 127.0.0.1, which would make an IP key one global
+    bucket — a trivial lockout. The login handler also verifies credentials
+    BEFORE consulting this, so a correct password is never refused."""
 
     def __init__(self, *, max_fails=5, window_s=300, now_fn=time.monotonic):
         self.max_fails = max_fails
@@ -66,7 +71,12 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
     def root(request: Request):
         if not request.session.get("user"):
             return RedirectResponse("/login", status_code=303)
-        return FileResponse(UI_DIR / "index.html")
+        # Inject the web-mode flag so app.js uses fetch() instead of the
+        # pywebview bridge. The desktop app serves the raw index.html (no flag).
+        html = (UI_DIR / "index.html").read_text(encoding="utf-8")
+        html = html.replace(
+            "<head>", "<head>\n<script>window.__MP_WEB__=true;</script>", 1)
+        return HTMLResponse(html)
 
     @app.get("/login")
     def login_page():
@@ -74,18 +84,19 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
 
     @app.post("/login")
     async def login(request: Request):
-        ip = request.client.host if request.client else "?"
-        if throttle.blocked(ip):
-            return RedirectResponse("/login?error=throttled", status_code=303)
         form = await request.form()
         username = (form.get("username") or "").strip()
         password = form.get("password") or ""
+        # Verify FIRST so a correct password is NEVER refused: a flood of bad
+        # logins cannot lock out someone who knows their password. The throttle
+        # is keyed by username and only flags repeated *failed* attempts.
         if store.verify(username, password):
-            throttle.reset(ip)
+            throttle.reset(username)
             request.session["user"] = username
             return RedirectResponse("/", status_code=303)
-        throttle.record_fail(ip)
-        return RedirectResponse("/login?error=1", status_code=303)
+        throttle.record_fail(username)
+        err = "throttled" if throttle.blocked(username) else "1"
+        return RedirectResponse(f"/login?error={err}", status_code=303)
 
     @app.post("/logout")
     def logout(request: Request):
@@ -107,7 +118,15 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
         if not isinstance(args, list):
             args = [] if args is None else [args]
         api = registry.get_api(user)
-        result = await run_in_threadpool(getattr(api, method), *args)
+        dlock = registry.dispatch_lock(user)
+
+        def _call():
+            # Serialize per-user access to the single shared sqlite connection;
+            # the threadpool runs requests in parallel otherwise.
+            with dlock:
+                return getattr(api, method)(*args)
+
+        result = await run_in_threadpool(_call)
         return JSONResponse(result)
 
     @app.get("/api/export_csv")
@@ -117,7 +136,13 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         api = registry.get_api(user)
         out_dir = registry.user_dir(user) / "exports"
-        res = await run_in_threadpool(api.export_csv, month, str(out_dir))
+        dlock = registry.dispatch_lock(user)
+
+        def _export():
+            with dlock:
+                return api.export_csv(month, str(out_dir))
+
+        res = await run_in_threadpool(_export)
         if not res.get("ok"):
             return JSONResponse(res, status_code=400)
         return FileResponse(res["path"], media_type="text/csv",

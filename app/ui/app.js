@@ -4,9 +4,11 @@
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
-// Desktop (pywebview) loads index.html via file://; the web server serves it
-// over http(s). Detect the mode once and branch the bridge accordingly.
-const WEB = location.protocol === "http:" || location.protocol === "https:";
+// The web server injects `window.__MP_WEB__ = true` into the HTML it serves; the
+// desktop app (pywebview) serves the raw index.html without it. That flag — NOT
+// location.protocol — is what distinguishes the two, because pywebview 6.x also
+// serves the page over http:// from its own local server.
+const WEB = window.__MP_WEB__ === true;
 const ready = WEB
   ? Promise.resolve()
   : new Promise((res) => window.addEventListener("pywebviewready", res));

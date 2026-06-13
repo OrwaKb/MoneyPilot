@@ -181,10 +181,64 @@ def test_login_throttle_unit():
     assert not th.blocked("1.2.3.4")
 
 
-def test_login_throttle_integration(tmp_path):
+def test_login_throttle_no_lockout_of_valid_credentials(tmp_path):
+    # Regression for the global-lockout DoS: a flood of wrong passwords flags
+    # throttling on the FAILED attempts, but a correct password is NEVER refused.
     with TestClient(_make_app(tmp_path)) as c:
-        for _ in range(5):
+        last_bad = None
+        for _ in range(6):
+            last_bad = _login(c, "alice", "WRONG")
+        assert "throttled" in last_bad.headers["location"]   # failures flagged
+        good = _login(c, "alice", "pw1")                     # ...valid still works
+        assert good.status_code == 303 and good.headers["location"].endswith("/")
+        assert c.post("/api/get_overview", json=[]).status_code == 200
+
+
+def test_login_throttle_is_per_username(tmp_path):
+    # alice being hammered must not lock out bob.
+    with TestClient(_make_app(tmp_path)) as c:
+        for _ in range(6):
             _login(c, "alice", "WRONG")
-        r = _login(c, "alice", "pw1")      # correct, but should be blocked now
-        assert "throttled" in r.headers["location"]
-        assert c.post("/api/get_overview", json=[]).status_code == 401
+        good = _login(c, "bob", "pw2")
+        assert good.status_code == 303 and good.headers["location"].endswith("/")
+
+
+def test_dispatch_lock_is_per_user(tmp_path):
+    reg = Registry(tmp_path)
+    assert reg.dispatch_lock("alice") is reg.dispatch_lock("alice")
+    assert reg.dispatch_lock("alice") is not reg.dispatch_lock("bob")
+
+
+def test_concurrent_same_user_requests_do_not_error(tmp_path, monkeypatch):
+    # Regression: one cached Api per user holds ONE sqlite connection, and
+    # FastAPI runs sync methods in a threadpool. Without per-user serialization,
+    # concurrent same-user reads+writes race the connection and raise
+    # transaction-state errors. The dispatch lock must keep them clean.
+    monkeypatch.setattr(ai_client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            ai_client.AIUnavailable("offline")))
+    import threading
+    app = _make_app(tmp_path)
+    errors = []
+
+    def worker(kind):
+        try:
+            with TestClient(app) as c:
+                _login(c, "alice", "pw1")
+                for _ in range(10):
+                    if kind == "w":
+                        r = c.post("/api/add_entry", json=["10 coffee"])
+                    else:
+                        r = c.post("/api/get_overview", json=[])
+                    if r.status_code != 200 or r.json().get("ok") is False:
+                        errors.append((kind, r.status_code, r.json().get("error")))
+        except Exception as e:                       # record any thread crash
+            errors.append((kind, "exc", repr(e)))
+
+    threads = [threading.Thread(target=worker, args=(k,))
+               for k in ("w", "r", "w", "r")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors[:5]
