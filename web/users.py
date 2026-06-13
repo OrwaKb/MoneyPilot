@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from web.auth import UserStore
+from web.registry import valid_username
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_USERS = Path(os.environ.get("MP_USERS_DIR",
@@ -30,6 +31,10 @@ def main(argv=None) -> int:
 
     if not args.username:
         ap.error(f"{args.action} requires a username")
+
+    if args.action in ("add", "passwd") and not valid_username(args.username):
+        ap.error("username must be 1-32 chars of lowercase letters, digits, "
+                 "'-' or '_' (so it maps to a safe per-user folder)")
 
     if args.action == "remove":
         store.remove(args.username)

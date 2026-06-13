@@ -151,6 +151,17 @@ def test_cli_remove(tmp_path, monkeypatch):
     assert not auth.UserStore(upath).exists("bob")
 
 
+def test_cli_add_rejects_invalid_username(tmp_path, monkeypatch):
+    # A name that can't map to a safe users/<name>/ dir must be rejected at
+    # creation — otherwise it could log in but error on every request.
+    upath = tmp_path / "users.json"
+    monkeypatch.setattr(users_cli.getpass, "getpass", lambda *a, **k: "secret")
+    for bad in ["Bad Name", "../escape", "CAPS", "a" * 33]:
+        with pytest.raises(SystemExit):           # argparse .error() exits
+            users_cli.main(["add", bad, "--users", str(upath)])
+        assert not auth.UserStore(upath).exists(bad)
+
+
 def test_export_csv_downloads(tmp_path):
     with TestClient(_make_app(tmp_path)) as c:
         _login(c, "alice", "pw1")

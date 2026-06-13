@@ -10,6 +10,14 @@ from app.api import Api
 _VALID = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
+def valid_username(name: str) -> bool:
+    """True if `name` is safe as a per-user directory / store key: 1-32 chars
+    of lowercase letters, digits, hyphen or underscore. Shared by the CLI so a
+    name that can't map to a users/<name>/ dir is rejected at creation, not
+    after it has been used to log in."""
+    return bool(_VALID.match(name or ""))
+
+
 class Registry:
     """One cached Api per user, each bound to users/<name>/ledger.db."""
 
@@ -20,7 +28,7 @@ class Registry:
         self._lock = threading.Lock()
 
     def user_dir(self, username: str) -> Path:
-        if not _VALID.match(username or ""):
+        if not valid_username(username):
             raise ValueError(f"invalid username: {username!r}")
         return self.base / username
 
