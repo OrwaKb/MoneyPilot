@@ -128,3 +128,24 @@ def test_two_users_isolated(tmp_path, monkeypatch):
         a_recent = ca.post("/api/get_overview", json=[]).json()["recent"]
         b_recent = cb.post("/api/get_overview", json=[]).json()["recent"]
         assert len(a_recent) == 1 and len(b_recent) == 0
+
+
+from web import users as users_cli
+
+
+def test_cli_add_and_list(tmp_path, monkeypatch, capsys):
+    upath = tmp_path / "users.json"
+    monkeypatch.setattr(users_cli.getpass, "getpass", lambda *a, **k: "secret")
+    assert users_cli.main(["add", "alice", "--users", str(upath)]) == 0
+    store = auth.UserStore(upath)
+    assert store.verify("alice", "secret")
+    assert users_cli.main(["list", "--users", str(upath)]) == 0
+    assert "alice" in capsys.readouterr().out
+
+
+def test_cli_remove(tmp_path, monkeypatch):
+    upath = tmp_path / "users.json"
+    monkeypatch.setattr(users_cli.getpass, "getpass", lambda *a, **k: "secret")
+    users_cli.main(["add", "bob", "--users", str(upath)])
+    assert users_cli.main(["remove", "bob", "--users", str(upath)]) == 0
+    assert not auth.UserStore(upath).exists("bob")
