@@ -55,3 +55,14 @@ def test_ask_claude_error_carries_both_reasons(monkeypatch):
     with pytest.raises(client.AIUnavailable) as ei:
         client.ask_claude("hi")
     assert "boom" in str(ei.value) and "nope" in str(ei.value)
+
+def test_ask_claude_logs_when_both_fail(monkeypatch, caplog):
+    import logging
+    monkeypatch.setattr(client, "_via_sdk",
+                        lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(client, "_via_cli",
+                        lambda *a: (_ for _ in ()).throw(client.AIUnavailable("nope")))
+    with caplog.at_level(logging.WARNING, logger="moneypilot.ai"):
+        with pytest.raises(client.AIUnavailable):
+            client.ask_claude("hi")
+    assert any(r.name == "moneypilot.ai" for r in caplog.records)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 
 from pydantic import ValidationError
 
@@ -9,6 +10,8 @@ from app import db
 from app.ai import client, prompts
 from app.engine import insights
 from app.models import ParsedTxn, fmt_ils, to_agorot
+
+log = logging.getLogger("moneypilot.advisor")
 
 _SETTING_WHITELIST = {"salary_day", "salary_amount_agorot", "card_charge_day",
                       "user_name"}
@@ -41,8 +44,10 @@ def get_briefing(conn, today: dt.date, force: bool = False) -> dict:
             system=prompts.BRIEFING_SYSTEM, timeout_s=45).strip()
         db.put_briefing(conn, today.isoformat(), text, json.dumps(fp))
         return {"text": text, "source": "ai"}
-    except Exception:
-        # template is NOT cached so a later refresh can upgrade to AI
+    except client.AIUnavailable as e:
+        # Genuine AI outage → deterministic template. NOT cached, so a later
+        # refresh can upgrade to AI. Other (unexpected) exceptions propagate.
+        log.warning("briefing falling back to template: %s", e)
         return {"text": template_briefing(fp), "source": "template"}
 
 
@@ -70,7 +75,10 @@ def chat(conn, text: str, today: dt.date, conversation_id=None) -> dict:
             prompts.CHAT_USER_TMPL.format(facts=json.dumps(fp),
                                           history=history, question=text),
             system=prompts.CHAT_SYSTEM, timeout_s=60)
-    except Exception:
+    except client.AIUnavailable as e:
+        # Genuine AI outage → graceful offline reply. Other (unexpected)
+        # exceptions are bugs and must surface, not hide behind "offline".
+        log.warning("chat offline: %s", e)
         return {"text": "Advisor offline — your data is safe and the numbers on"
                         " the Overview are still live. Try again later.",
                 "action": None, "offline": True,

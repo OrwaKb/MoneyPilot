@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
+
+log = logging.getLogger("moneypilot.ai")
 
 
 class AIUnavailable(Exception):
@@ -77,4 +80,9 @@ def ask_claude(prompt: str, system=None, timeout_s: int = 60) -> str:
         try:
             return _via_cli(prompt, system, timeout_s)
         except AIUnavailable as cli_exc:
+            # Both transports failed. Log the detail so a recurrence is
+            # diagnosable — the GUI suppresses consoles, so this file log is
+            # the only trace of WHY the advisor went offline.
+            log.warning("AI unavailable — both transports failed. "
+                        "SDK: %r ; CLI: %s", sdk_exc, cli_exc)
             raise AIUnavailable(f"SDK: {sdk_exc!r}; CLI: {cli_exc}") from cli_exc

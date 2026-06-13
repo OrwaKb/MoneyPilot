@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import socket
 import sys
 import threading
@@ -92,6 +93,13 @@ def main() -> None:
 
     ddir = data_dir()
     ddir.mkdir(parents=True, exist_ok=True)
+
+    # The GUI runs under pythonw (no console), so route warnings to a file —
+    # this is where an "Advisor offline" cause is recorded for diagnosis.
+    logging.basicConfig(
+        filename=str(ddir / "moneypilot.log"), encoding="utf-8",
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     if args.restore:
         conn = db.connect(ddir / "ledger.db")

@@ -1,6 +1,8 @@
 import datetime as dt
 import json
 
+import pytest
+
 from app import db
 from app.ai import advisor, client
 
@@ -50,6 +52,20 @@ def test_chat_offline(seeded, monkeypatch):
                             client.AIUnavailable("x")))
     r = advisor.chat(seeded, "hello?", TODAY)
     assert r["offline"] is True
+
+def test_chat_propagates_unexpected_error(seeded, monkeypatch):
+    # A non-AIUnavailable exception is a real bug, not an outage — it must
+    # surface, not masquerade as "Advisor offline".
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("bug")))
+    with pytest.raises(RuntimeError):
+        advisor.chat(seeded, "hello?", TODAY)
+
+def test_briefing_propagates_unexpected_error(seeded, monkeypatch):
+    monkeypatch.setattr(advisor.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("bug")))
+    with pytest.raises(RuntimeError):
+        advisor.get_briefing(seeded, TODAY)
 
 
 def test_chat_creates_conversation_titled_from_message(seeded, monkeypatch):
