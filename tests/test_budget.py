@@ -37,6 +37,21 @@ def test_safe_to_spend_matches_user_worked_example(tmp_path):
     assert s["remaining_agorot"] == 250000                  # −2500 + 5000
     assert s["today_agorot"] == 250000 // 27                # ≈ ₪92.59
 
+def test_salary_anticipated_when_payday_precedes_opening_date(seeded):
+    # Real-world bug: you set your opening balance AFTER this cycle's payday, so
+    # the salary income is dated before opening_date -> excluded from available.
+    # It must still be anticipated (not treated as already on-hand), else a
+    # payday that precedes your opening snapshot vanishes and STS reads ~0.
+    db.set_setting(seeded, "opening_balance_date", "2026-06-11")   # = TODAY
+    db.set_setting(seeded, "opening_balance_agorot", "-256162")    # overdrawn
+    db.add_transaction(seeded, effective_date=dt.date(2026, 6, 10),  # before opening
+                       amount_agorot=900000, direction="income",
+                       category_id=db.category_id_by_name(seeded, "Salary"))
+    s = budget.safe_to_spend(seeded, TODAY)
+    assert s["available_agorot"] == -256162          # salary excluded (pre-opening)
+    assert s["expected_salary_agorot"] == 900000     # ...so it's anticipated, not lost
+    assert s["remaining_agorot"] == -256162 + 900000
+
 def test_safe_to_spend_stable_once_salary_logged(seeded):
     # logging the salary must NOT double-count: remaining is unchanged
     before = budget.safe_to_spend(seeded, TODAY)["remaining_agorot"]

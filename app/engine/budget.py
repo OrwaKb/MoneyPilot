@@ -66,8 +66,18 @@ def safe_to_spend(conn, today: dt.date) -> dict:
     available = available_balance(conn)
     # Anticipate the salary not yet received this cycle (so safe-to-spend
     # reflects the money that's coming, and doesn't double-count once logged).
+    # Count income only since the opening-balance date when that's later than
+    # the cycle start: income before the opening snapshot is already baked into
+    # the balance and is NOT in available_balance, so it must still be
+    # anticipated — otherwise a payday that precedes your opening date vanishes.
     salary = int(db.get_setting(conn, "salary_amount_agorot", "0"))
-    income_so_far, _ = cycle_net(conn, cyc["start"], today)
+    income_start = cyc["start"]
+    opening_date = db.get_setting(conn, "opening_balance_date")
+    if opening_date:
+        od = dt.date.fromisoformat(opening_date)
+        if od > income_start:
+            income_start = od
+    income_so_far, _ = cycle_net(conn, income_start, today)
     expected_salary = max(0, salary - income_so_far)
     from app.engine import goals          # late import: goals imports budget
     goal_reserve = goals.cycle_savings_reserve(conn, today)
