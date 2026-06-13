@@ -25,6 +25,11 @@ def verify_password(password: str, record: dict) -> bool:
     return hmac.compare_digest(dk.hex(), record["hash"])
 
 
+# Fixed decoy record (one pbkdf2 at import) so verifying an unknown username
+# does exactly one pbkdf2 of the standard cost — same as a known user.
+_DECOY = hash_password("decoy")
+
+
 class UserStore:
     """Tiny JSON-backed credential store: {username: {salt, hash, iterations}}."""
 
@@ -48,8 +53,10 @@ class UserStore:
     def verify(self, username: str, password: str) -> bool:
         rec = self._load().get(username)
         if not rec:
-            # constant-ish work for unknown users to blunt a timing oracle
-            verify_password(password, hash_password("decoy"))
+            # one pbkdf2 against a FIXED decoy (computed once at import) so an
+            # unknown username costs exactly the same as a known one — hashing
+            # a fresh decoy here did TWO pbkdf2s, a reverse timing oracle.
+            verify_password(password, _DECOY)
             return False
         return verify_password(password, rec)
 

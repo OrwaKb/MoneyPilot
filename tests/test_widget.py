@@ -73,6 +73,14 @@ def test_set_pin_updates_window_and_setting(wapi):
     assert db.get_setting(wapi._api.conn, "widget_on_top") == "0"
 
 
+def test_set_pin_degrades_gracefully_on_error(wapi, monkeypatch):
+    # a db/window failure must return {ok: False}, not throw across the bridge
+    wapi._window = _FakeWindow()
+    monkeypatch.setattr(db, "set_setting",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    assert wapi.set_pin(True) == {"ok": False}
+
+
 def test_open_main_app_focuses_running_cockpit(wapi, monkeypatch):
     import app.widget as w
     monkeypatch.setattr(w, "_try_focus_running", lambda ddir: True)

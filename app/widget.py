@@ -46,11 +46,14 @@ class WidgetApi:
 
     # --- widget-only surface -------------------------------------------------
     def set_pin(self, on):
-        on = bool(on)
-        if self._window is not None:
-            self._window.on_top = on
-        db.set_setting(self._api.conn, "widget_on_top", 1 if on else 0)
-        return {"ok": True, "on": on}
+        try:
+            on = bool(on)
+            if self._window is not None:
+                self._window.on_top = on
+            db.set_setting(self._api.conn, "widget_on_top", 1 if on else 0)
+            return {"ok": True, "on": on}
+        except Exception:
+            return {"ok": False}        # never throw across the bridge
 
     def save_geometry(self):
         try:

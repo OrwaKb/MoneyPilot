@@ -237,6 +237,10 @@ def test_apply_action_validates_salary_amount(seeded):
         advisor.apply_action(seeded, {"type": "adjust_setting",
                                       "key": "salary_amount_agorot",
                                       "value": "6000 shekels"}, TODAY)
+    with pytest.raises(ValueError):       # whole shekels only (not 6000.50)
+        advisor.apply_action(seeded, {"type": "adjust_setting",
+                                      "key": "salary_amount_agorot",
+                                      "value": "600050"}, TODAY)
     advisor.apply_action(seeded, {"type": "adjust_setting",
                                   "key": "salary_amount_agorot",
                                   "value": "600000"}, TODAY)

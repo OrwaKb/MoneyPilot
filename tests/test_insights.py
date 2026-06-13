@@ -26,6 +26,18 @@ def test_fact_pack_shape_and_json_safe(seeded):
         assert key in fp, key
     json.dumps(fp)  # must be JSON-serializable as-is
 
+def test_safe_to_spend_surfaces_rolling_allowance_fields(seeded):
+    # the cockpit/widget read the per-day accrual and discretionary spend so they
+    # can render "+₪X/day" alongside the rolling hero
+    from app.models import fmt_ils
+    sts = insights.fact_pack(seeded, TODAY)["safe_to_spend"]
+    for k in ("today_agorot", "daily_allowance_agorot", "cycle_spent_agorot",
+              "remaining_agorot"):
+        assert k in sts, k
+    assert sts["daily_allowance_fmt"] == fmt_ils(sts["daily_allowance_agorot"])
+    assert sts["cycle_spent_fmt"] == fmt_ils(sts["cycle_spent_agorot"])
+
+
 def test_safe_to_spend_surfaces_goal_reserve(seeded):
     # the deadline-goal savings reserve is exposed (agorot + formatted) so the
     # cockpit/widget can show why safe-to-spend is lower

@@ -1,5 +1,7 @@
 import datetime as dt
 
+import pytest
+
 from app import db
 from app.engine import budget
 
@@ -13,29 +15,48 @@ def _spend(conn, cat, agorot, day=TODAY, method="card"):
                        payment_method=method, description="t")
 
 
+@pytest.fixture
+def env(tmp_path):
+    """Clean envelope ledger for rolling-allowance mechanics: ₪70/day
+    (pool ₪2,100 over a 30-day cycle), no salary noise. cycle = Jun10..Jul9."""
+    c = db.connect(tmp_path / "env.db")
+    db.init_db(c)
+    db.set_setting(c, "salary_day", "10")
+    db.set_setting(c, "salary_amount_agorot", "0")
+    db.set_setting(c, "opening_balance_agorot", "210000")   # ₪2,100
+    db.set_setting(c, "opening_balance_date", "2026-06-01")
+    yield c
+    c.close()
+
+
 def test_safe_to_spend_projects_unreceived_salary(seeded):
-    # safe-to-spend = (balance + salary you'll still get this cycle) / days to
-    # payday. Category budgets do NOT define it. seeded: opening ₪5,000, salary
-    # ₪9,000 (setting), nothing logged yet -> the ₪9,000 is anticipated.
+    # the pool = balance + salary you'll still get this cycle − goals; the daily
+    # allowance spreads it over the WHOLE cycle (not days-left), and today is the
+    # rolling balance. seeded: opening ₪5,000, salary ₪9,000 (setting), nothing
+    # logged yet -> ₪9,000 anticipated; TODAY is cycle day 2.
     s = budget.safe_to_spend(seeded, TODAY)
     assert s["available_agorot"] == 500000           # actual money now
     assert s["expected_salary_agorot"] == 900000     # not received yet
     assert s["goal_reserve_agorot"] == 0
-    assert s["remaining_agorot"] == 500000 + 900000
+    assert s["remaining_agorot"] == 500000 + 900000  # money left this cycle
     assert s["days_left"] == 29
-    assert s["today_agorot"] == (500000 + 900000) // 29
+    assert s["daily_allowance_agorot"] == (500000 + 900000) // 30  # spread over cycle
+    assert s["cycle_spent_agorot"] == 0
+    assert s["today_agorot"] == ((500000 + 900000) // 30) * 2      # day 2, banked
 
-def test_safe_to_spend_matches_user_worked_example(tmp_path):
-    # balance −₪2,500, salary ₪5,000, ~27 days left -> ~₪92/day
+def test_safe_to_spend_worked_example_overdrawn(tmp_path):
+    # balance −₪2,500, salary ₪5,000 -> pool ₪2,500 spread over a 30-day cycle.
+    # On cycle day 4 with nothing spent, today = 4 days of allowance banked.
     c = db.connect(tmp_path / "x.db"); db.init_db(c)
     db.set_setting(c, "salary_day", "10")
     db.set_setting(c, "salary_amount_agorot", "500000")     # ₪5,000
     db.set_setting(c, "opening_balance_agorot", "-250000")  # ₪−2,500
     db.set_setting(c, "opening_balance_date", "2026-06-01")
-    s = budget.safe_to_spend(c, dt.date(2026, 6, 13))       # cycle Jun10..Jul9
+    s = budget.safe_to_spend(c, dt.date(2026, 6, 13))       # cycle Jun10..Jul9, day 4
     assert s["days_left"] == 27
     assert s["remaining_agorot"] == 250000                  # −2500 + 5000
-    assert s["today_agorot"] == 250000 // 27                # ≈ ₪92.59
+    assert s["daily_allowance_agorot"] == 250000 // 30
+    assert s["today_agorot"] == (250000 // 30) * 4          # day_index 4
 
 def test_salary_anticipated_when_payday_precedes_opening_date(seeded):
     # Real-world bug: you set your opening balance AFTER this cycle's payday, so
@@ -104,11 +125,14 @@ def test_cycle_net(seeded):
                                         dt.date(2026, 7, 9))
     assert income == 900000 and expenses == 4500
 
-def test_safe_to_spend_clamps_to_zero_when_overdrawn(seeded):
-    # spend beyond balance + the anticipated salary -> nothing safe to spend
+def test_safe_to_spend_goes_negative_when_overspent(seeded):
+    # blow past balance + anticipated salary -> the rolling balance goes negative
+    # (you have to dig out), instead of silently flooring at zero
     _spend(seeded, "Fun", 1_500_000)   # opening 500000 + salary 900000 = 1.4M
     s = budget.safe_to_spend(seeded, TODAY)
-    assert s["remaining_agorot"] < 0 and s["today_agorot"] == 0
+    assert s["remaining_agorot"] < 0
+    assert s["today_agorot"] < 0
+    assert s["cycle_spent_agorot"] == 1_500_000
 
 def test_soft_deleted_expense_not_counted(seeded):
     _spend(seeded, "Food out", 4500)
@@ -137,7 +161,9 @@ def test_safe_to_spend_subtracts_goal_savings(seeded):
     s = budget.safe_to_spend(seeded, TODAY)
     assert 0 < s["goal_reserve_agorot"] <= 100000
     assert s["remaining_agorot"] == base["remaining_agorot"] - s["goal_reserve_agorot"]
-    assert s["today_agorot"] == s["remaining_agorot"] // s["days_left"]
+    # the reserve lowers the pool -> lower daily allowance; today is day-2 rolling
+    assert s["daily_allowance_agorot"] == max(0, s["remaining_agorot"]) // 30
+    assert s["today_agorot"] == s["daily_allowance_agorot"] * 2
 
 
 def test_goal_reserve_capped_at_amount_remaining(seeded):
@@ -166,3 +192,110 @@ def test_goal_reserve_shrinks_as_goal_is_funded(seeded):
                        description="half funded")
     after = budget.safe_to_spend(seeded, TODAY)["goal_reserve_agorot"]
     assert 0 <= after < before
+
+
+# --- rolling daily allowance (envelope) -------------------------------------
+
+D10, D11, D12 = (dt.date(2026, 6, 10), dt.date(2026, 6, 11), dt.date(2026, 6, 12))
+
+
+def test_allowance_banks_unspent_days(env):
+    # ₪70/day; spend nothing -> the rolling balance banks a day's allowance daily
+    d1 = budget.safe_to_spend(env, D10)
+    assert d1["daily_allowance_agorot"] == 7000
+    assert d1["today_agorot"] == 7000        # cycle day 1
+    assert budget.safe_to_spend(env, D11)["today_agorot"] == 14000   # banked
+    assert budget.safe_to_spend(env, D12)["today_agorot"] == 21000
+
+
+def test_overspend_shows_negative_then_recovers(env):
+    # the user's worked example: ₪70/day allowance, spend ₪100 on day 1
+    _spend(env, "Food out", 10000, day=D10)
+    d1 = budget.safe_to_spend(env, D10)
+    assert d1["daily_allowance_agorot"] == 7000     # stable despite the spend
+    assert d1["today_agorot"] == -3000              # ₪70 − ₪100
+    d2 = budget.safe_to_spend(env, D11)
+    assert d2["today_agorot"] == 4000               # ₪140 − ₪100 = ₪40
+
+
+def test_daily_allowance_stable_across_same_day_spends(env):
+    base = budget.safe_to_spend(env, D11)["daily_allowance_agorot"]
+    _spend(env, "Food out", 5000, day=D11)
+    assert budget.safe_to_spend(env, D11)["daily_allowance_agorot"] == base
+
+
+def test_discretionary_spend_lowers_today_by_full_amount(env):
+    before = budget.safe_to_spend(env, D12)["today_agorot"]
+    _spend(env, "Fun", 5000, day=D12)
+    after = budget.safe_to_spend(env, D12)["today_agorot"]
+    assert after == before - 5000          # spent it -> gone from today, exactly
+
+
+def test_fixed_bill_excluded_from_allowance_but_lowers_it(env):
+    # a fixed bill is "pocket money": it doesn't count as discretionary spend
+    # (no one-day crash) but it lowers the daily allowance for the rest of cycle
+    before = budget.safe_to_spend(env, D12)
+    _spend(env, "Bills", 3000, day=D12, method="transfer")  # Bills is_fixed
+    after = budget.safe_to_spend(env, D12)
+    assert after["cycle_spent_agorot"] == before["cycle_spent_agorot"]   # not counted
+    assert after["daily_allowance_agorot"] < before["daily_allowance_agorot"]
+    drop = before["today_agorot"] - after["today_agorot"]
+    assert 0 < drop < 3000                 # smoothed, not the full ₪30 in one day
+
+
+def test_overdrawn_pool_reports_full_shortfall(tmp_path):
+    # overdrawn for the whole cycle (a fixed bill) WITH some discretionary spend:
+    # today must report the TRUE shortfall (<= remaining), not the rosier
+    # -disc_spent the old max(0,pool) floor produced.
+    c = db.connect(tmp_path / "od.db"); db.init_db(c)
+    db.set_setting(c, "salary_day", "10")
+    db.set_setting(c, "salary_amount_agorot", "0")
+    db.set_setting(c, "opening_balance_agorot", "10000")
+    db.set_setting(c, "opening_balance_date", "2026-06-01")
+    _spend(c, "Bills", 60000, day=D10, method="transfer")   # fixed
+    _spend(c, "Fun", 50000, day=D10)                         # discretionary
+    s = budget.safe_to_spend(c, D10)
+    assert s["remaining_agorot"] == -100000
+    assert s["today_agorot"] <= s["remaining_agorot"]
+    assert s["today_agorot"] == -100000        # full shortfall, not -50000
+
+
+def test_fixed_bill_overdraw_shows_negative_not_zero(tmp_path):
+    # the misleading case: a big fixed bill overdraws the cycle with ~no
+    # discretionary spend. today must read NEGATIVE (underwater), not ₪0.
+    c = db.connect(tmp_path / "fb.db"); db.init_db(c)
+    db.set_setting(c, "salary_day", "10")
+    db.set_setting(c, "salary_amount_agorot", "0")
+    db.set_setting(c, "opening_balance_agorot", "100000")
+    db.set_setting(c, "opening_balance_date", "2026-06-01")
+    _spend(c, "Bills", 500000, day=D10, method="transfer")   # fixed, overdraws
+    s = budget.safe_to_spend(c, D10)
+    assert s["daily_allowance_agorot"] == 0
+    assert s["today_agorot"] < 0
+    assert s["today_agorot"] == -400000        # NOT a break-even-looking 0
+
+
+def test_future_dated_discretionary_spend_does_not_move_today(env):
+    # a discretionary expense dated later this cycle hasn't happened yet — it
+    # must not move today's allowance (the stable-vs-spending property must hold)
+    before = budget.safe_to_spend(env, D11)
+    _spend(env, "Fun", 5000, day=dt.date(2026, 6, 20))       # future, in-cycle
+    after = budget.safe_to_spend(env, D11)
+    assert after["today_agorot"] == before["today_agorot"]
+    assert after["daily_allowance_agorot"] == before["daily_allowance_agorot"]
+
+
+def test_accrual_and_spend_window_start_at_mid_cycle_opening_date(tmp_path):
+    # onboarded mid-cycle: opening_date Jun13 (cycle started Jun10). A spend dated
+    # before opening is baked into the opening balance -> must not be double-counted,
+    # and accrual starts at the opening date (day 1), spread over the remaining days.
+    c = db.connect(tmp_path / "mid.db"); db.init_db(c)
+    db.set_setting(c, "salary_day", "10")
+    db.set_setting(c, "salary_amount_agorot", "0")
+    db.set_setting(c, "opening_balance_agorot", "210000")
+    db.set_setting(c, "opening_balance_date", "2026-06-13")
+    _spend(c, "Food out", 9999, day=dt.date(2026, 6, 11))   # pre-opening, in cycle
+    s = budget.safe_to_spend(c, dt.date(2026, 6, 13))
+    assert s["cycle_spent_agorot"] == 0                     # pre-opening spend ignored
+    assert s["daily_allowance_agorot"] == 210000 // 27      # Jun13..Jul9 = 27 days
+    assert s["today_agorot"] == (210000 // 27) * 1          # day 1 from opening

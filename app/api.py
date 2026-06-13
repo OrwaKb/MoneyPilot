@@ -17,15 +17,22 @@ ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
 
 
 def _safe(fn):
-    """Every bridge method returns a dict; exceptions become {ok: False}."""
+    """Every bridge method returns a dict; exceptions become {ok: False}.
+
+    error_kind tags whether the message is meant for the user (a ValueError we
+    raised on purpose) or is an unexpected internal failure. The desktop shows
+    the message either way; the web layer uses the tag to hide internal detail
+    (SQLite text, file paths) from a remote client."""
     @functools.wraps(fn)
     def wrapper(self, *args, **kwargs):
         try:
             out = fn(self, *args, **kwargs)
             out.setdefault("ok", True)
             return out
-        except Exception as e:  # surfaced in the UI as a toast
-            return {"ok": False, "error": str(e)}
+        except ValueError as e:           # deliberate, user-facing validation
+            return {"ok": False, "error": str(e), "error_kind": "user"}
+        except Exception as e:            # unexpected — message may leak internals
+            return {"ok": False, "error": str(e), "error_kind": "internal"}
     return wrapper
 
 
@@ -104,8 +111,17 @@ class Api:
             try:
                 db.update_transaction(self.conn, txn_id, **clean)
             except sqlite3.IntegrityError as e:
-                raise ValueError("amount sign must match direction"
-                                 " (income +, expense/goal -)") from e
+                # the txn table has 3 constraints that all raise IntegrityError:
+                # the amount-sign CHECK, the category FK, the payment_method CHECK
+                # — report the one the edit actually hit, not always "sign".
+                msg = str(e).upper()
+                if "FOREIGN KEY" in msg:
+                    raise ValueError("that category no longer exists") from e
+                if "amount_agorot" in clean:
+                    raise ValueError("amount sign must match direction"
+                                     " (income +, expense/goal -)") from e
+                raise ValueError("could not update transaction"
+                                 " (invalid value)") from e
             if ("category_id" in clean and old
                     and clean["category_id"] != old["category_id"]
                     and old["description"]):
@@ -241,11 +257,35 @@ class Api:
 
     @_safe
     def save_settings(self, settings: dict):
+        # validate the known keys BEFORE writing any, so a bad value can't leave
+        # a half-applied settings change (db helpers autocommit per call)
+        clean = {}
+        for k, v in settings.items():
+            if v is None:
+                continue
+            v = str(v).strip()
+            if k in ("salary_day", "card_charge_day"):
+                if not v.isdigit() or not 1 <= int(v) <= 31:
+                    raise ValueError(f"{k.replace('_', ' ')} must be a day 1–31")
+                v = str(int(v))
+            elif k == "salary_amount_agorot":
+                if not v.isdigit() or int(v) <= 0 or int(v) % 100 != 0:
+                    raise ValueError("salary must be a positive whole number"
+                                     " of shekels")
+                v = str(int(v))
+            elif k == "default_payment_method":
+                if v not in ("card", "cash", "transfer"):
+                    raise ValueError("payment method must be card, cash or transfer")
+            clean[k] = v
         with self._lock:
-            for k, v in settings.items():
-                if v is None:
-                    continue
+            for k, v in clean.items():
                 db.set_setting(self.conn, k, v)
+        return {}
+
+    @_safe
+    def remove_category_budget(self, category_id: int):
+        with self._lock:
+            db.delete_budget(self.conn, int(category_id))
         return {}
 
     @_safe

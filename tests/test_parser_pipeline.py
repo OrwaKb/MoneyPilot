@@ -218,3 +218,36 @@ def test_fast_path_bails_on_date_words(seeded, monkeypatch):
     monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: GOOD_REPLY)
     res = parser.parse_and_store(seeded, "45 falafel yesterday", TODAY)
     assert res["used_ai"] is True  # rule exists but date word forces AI path
+
+
+def test_default_payment_method_used_by_fallback(seeded, monkeypatch):
+    # the configurable default flows into the offline fallback parse
+    db.set_setting(seeded, "default_payment_method", "cash")
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            client.AIUnavailable("offline")))
+    parser.parse_and_store(seeded, "45 falafel", TODAY)
+    assert db.list_transactions(seeded)[0]["payment_method"] == "cash"
+
+
+def test_default_payment_method_used_by_fast_path(seeded, monkeypatch):
+    db.set_setting(seeded, "default_payment_method", "cash")
+    db.add_rule(seeded, "falafel", db.category_id_by_name(seeded, "Food out"))
+    monkeypatch.setattr(parser.client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("fast path must not call AI")))
+    res = parser.parse_and_store(seeded, "45 falafel", TODAY)
+    assert res["source"] == "rule"
+    assert db.list_transactions(seeded)[0]["payment_method"] == "cash"
+
+
+def test_default_payment_method_in_parse_prompt(seeded, monkeypatch):
+    # the AI prompt carries the configured default so the model honours it
+    db.set_setting(seeded, "default_payment_method", "transfer")
+    seen = {}
+    def capture(prompt, system=None, timeout_s=60):
+        seen["prompt"] = prompt
+        return GOOD_REPLY
+    monkeypatch.setattr(parser.client, "ask_claude", capture)
+    parser.parse_and_store(seeded, "45 something new", TODAY)
+    assert "DEFAULT PAYMENT METHOD: transfer" in seen["prompt"]

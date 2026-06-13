@@ -33,6 +33,17 @@ def test_cli_transport_missing_exe_raises(monkeypatch):
     with pytest.raises(client.AIUnavailable):
         client._via_cli("hi", None, 5)
 
+def test_cli_transport_launch_oserror_raises_unavailable(monkeypatch):
+    # the exe shutil.which found can still fail to launch (OSError); that must
+    # surface as AIUnavailable so the advisor's graceful-offline path catches it
+    monkeypatch.setattr(client.shutil, "which", lambda _: r"C:\fake\claude.exe")
+    def boom(*a, **k):
+        raise OSError("exec format error")
+    monkeypatch.setattr(client.subprocess, "run", boom)
+    with pytest.raises(client.AIUnavailable):
+        client._via_cli("hi", None, 5)
+
+
 def test_ask_claude_falls_back_to_cli(monkeypatch):
     monkeypatch.setattr(client, "_via_sdk",
                         lambda *a: (_ for _ in ()).throw(ImportError()))

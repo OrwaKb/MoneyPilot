@@ -34,7 +34,8 @@ INCOME_HINTS = ["salary", "paycheck", "income", "got paid", "received", "refund"
 _AMOUNT_RE = re.compile(r"(\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+(?:[.,]\d{1,2})?)")
 
 
-def _line_to_txn(line: str, today: dt.date) -> ParsedTxn | None:
+def _line_to_txn(line: str, today: dt.date,
+                 default_method: str = "card") -> ParsedTxn | None:
     m = _AMOUNT_RE.search(line)
     if not m:
         return None
@@ -64,16 +65,18 @@ def _line_to_txn(line: str, today: dt.date) -> ParsedTxn | None:
                 break
     return ParsedTxn(effective_date=when, amount=amount, currency=currency,
                      direction=direction, category=category,
+                     payment_method=default_method,
                      description=line.strip(), confidence=0.3)
 
 
-def fallback_parse(text: str, today: dt.date) -> list[ParsedTxn]:
+def fallback_parse(text: str, today: dt.date,
+                   default_method: str = "card") -> list[ParsedTxn]:
     """Regex-only parse used when Claude is unreachable. Low confidence by design;
     callers must store results with needs_review=1. Raises ValueError if ANY
     non-empty line has no amount — silently dropping a line would lose an entry."""
     out = []
     for line in filter(None, (ln.strip() for ln in text.splitlines())):
-        txn = _line_to_txn(line, today)
+        txn = _line_to_txn(line, today, default_method)
         if txn is None:
             raise ValueError(f"no amount found in: {line!r}")
         out.append(txn)
@@ -86,6 +89,15 @@ def fallback_parse(text: str, today: dt.date) -> list[ParsedTxn]:
 
 REVIEW_CONFIDENCE = 0.7
 _FAST_RE = re.compile(r"^\s*(\d+(?:[.,]\d{1,2})?)\s+([^\d].*)$")
+_PAY_METHODS = ("card", "cash", "transfer")
+
+
+def _default_method(conn) -> str:
+    """The user's configured default payment method (Settings), 'card' if unset
+    or somehow invalid. The AI is told this default; the offline fast/fallback
+    paths apply it directly."""
+    m = db.get_setting(conn, "default_payment_method", "card")
+    return m if m in _PAY_METHODS else "card"
 
 
 def _fast_path(conn, text: str, today: dt.date) -> ParsedTxn | None:
@@ -110,7 +122,7 @@ def _fast_path(conn, text: str, today: dt.date) -> ParsedTxn | None:
     if amount <= 0:
         return None
     return ParsedTxn(effective_date=today,
-                     amount=amount,
+                     amount=amount, payment_method=_default_method(conn),
                      category=cat, description=m.group(2).strip(),
                      confidence=1.0)
 
@@ -123,7 +135,8 @@ def _build_prompt(conn, text: str, today: dt.date) -> tuple[str, str]:
     salary = int(db.get_setting(conn, "salary_amount_agorot", "0")) // 100
     user = prompts.PARSE_USER_TMPL.format(
         today=today.isoformat(), weekday=today.strftime("%A"),
-        categories=cats, rules=rules, goals=goal_names, salary=salary, text=text)
+        categories=cats, rules=rules, goals=goal_names, salary=salary,
+        default_method=_default_method(conn), text=text)
     return prompts.PARSE_SYSTEM, user
 
 
@@ -196,7 +209,8 @@ def parse_and_store(conn, text: str, today: dt.date) -> dict:
         parsed = _ai_parse(conn, text, today)
         source, used_ai = "ai", True
     except Exception:
-        parsed = fallback_parse(text, today)  # raises ValueError if no amount
+        # raises ValueError if no amount; applies the configured default method
+        parsed = fallback_parse(text, today, _default_method(conn))
         source, used_ai = "fallback", False
     ids = [_store(conn, p, raw_text=text, source=source) for p in parsed]
     return {"entries": ids, "used_ai": used_ai, "source": source}

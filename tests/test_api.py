@@ -49,6 +49,66 @@ def test_add_entry_bad_text_is_clean_error(api, monkeypatch):
     res = api.add_entry("nothing numeric here")
     assert res["ok"] is False and "amount" in res["error"]
 
+def test_save_settings_validates_known_keys(api):
+    bad_day = api.save_settings({"salary_day": "40"})
+    assert bad_day["ok"] is False and bad_day["error_kind"] == "user"
+    bad_amt = api.save_settings({"salary_amount_agorot": "-5"})
+    assert bad_amt["ok"] is False
+    bad_pm = api.save_settings({"default_payment_method": "bitcoin"})
+    assert bad_pm["ok"] is False
+    # salary must be WHOLE shekels (agorot divisible by 100) — the convention the
+    # whole-shekel UI relies on, so the Settings round-trip is lossless
+    bad_frac = api.save_settings({"salary_amount_agorot": "600050"})
+    assert bad_frac["ok"] is False and bad_frac["error_kind"] == "user"
+    # the bad values must NOT have been written
+    assert db.get_setting(api.conn, "salary_day") == "10"        # seeded value
+    assert db.get_setting(api.conn, "salary_amount_agorot") == "900000"
+
+
+def test_save_settings_accepts_valid(api):
+    res = api.save_settings({"user_name": "Orwa", "salary_day": "15",
+                             "card_charge_day": "3",
+                             "salary_amount_agorot": "600000",
+                             "default_payment_method": "cash"})
+    assert res["ok"] is True
+    assert db.get_setting(api.conn, "salary_day") == "15"
+    assert db.get_setting(api.conn, "default_payment_method") == "cash"
+    assert db.get_setting(api.conn, "user_name") == "Orwa"
+
+
+def test_remove_category_budget(api):
+    cid = db.category_id_by_name(api.conn, "Food out")
+    assert db.get_budgets(api.conn).get(cid) == 60000       # seeded
+    assert api.remove_category_budget(cid)["ok"] is True
+    assert cid not in db.get_budgets(api.conn)
+
+
+def test_update_txn_bad_category_message(api):
+    # a FK violation (unknown category) must NOT be mislabeled as an amount-sign
+    # error — the user edited the category, not the amount
+    tid = db.add_transaction(api.conn, effective_date=TODAY, amount_agorot=-4500,
+                             direction="expense",
+                             category_id=db.category_id_by_name(api.conn, "Food out"),
+                             description="x")
+    res = api.update_txn(tid, {"category_id": 999999})
+    assert res["ok"] is False
+    assert "sign" not in res["error"].lower()
+    assert "categ" in res["error"].lower()
+
+
+def test_safe_tags_user_vs_internal_error_kind(api, monkeypatch):
+    # a validation ValueError is user-facing; an unexpected error is internal
+    # (so the web layer can hide internal detail from a remote client)
+    user = api.save_goal({"name": "", "target_ils": 100})
+    assert user["ok"] is False and user["error_kind"] == "user"
+    from app.engine import insights
+    monkeypatch.setattr(insights, "fact_pack",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("boom /secret/path")))
+    internal = api.get_overview()
+    assert internal["ok"] is False and internal["error_kind"] == "internal"
+
+
 def test_get_overview_shape(api):
     res = api.get_overview()
     assert res["ok"] is True

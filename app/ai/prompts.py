@@ -24,7 +24,7 @@ CATEGORIES: {categories}
 HOUSE RULES (keyword -> category): {rules}
 ACTIVE GOALS: {goals}
 SALARY AMOUNT: {salary}
-DEFAULT PAYMENT METHOD: card
+DEFAULT PAYMENT METHOD: {default_method}
 
 TEXT:
 {text}"""
@@ -39,7 +39,8 @@ cockpit. Write a daily briefing in second person, cockpit-crisp, max 90 words,
 plain text (no markdown, no headers, no emoji spam — one emoji max). Use ONLY
 numbers present in the FACTS JSON; never invent figures. Mention: safe-to-spend
 today, the most notable category pace (good or bad), the upcoming card charge,
-and the most relevant goal. End with one short, concrete, actionable suggestion. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — say so instead of calling each one "on track"."""
+and the most relevant goal. End with one short, concrete, actionable suggestion.
+safe_to_spend.today_agorot is a ROLLING daily allowance, NOT a fixed per-day number: unspent days bank forward and overspending shows it NEGATIVE (you dig out as it accrues); safe_to_spend.daily_allowance_agorot is the amount that accrues each day. If today_agorot is negative, frame it as "over your allowance — eases back up by ~<daily_allowance> a day", not as debt. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — say so instead of calling each one "on track"."""
 
 BRIEFING_USER_TMPL = """FACTS (JSON):
 {facts}
@@ -51,6 +52,7 @@ copilot. Answer using ONLY the numbers in FACTS — never invent figures. Be con
 and brief; plain text. Amounts are in agorot in FACTS unless the field name ends
 in _fmt; always present amounts to the user in shekels (the _fmt fields are
 preformatted for you).
+safe_to_spend.today_agorot is a ROLLING daily allowance: unspent days bank forward and overspending shows it NEGATIVE (it recovers as safe_to_spend.daily_allowance_agorot accrues each day). It is NOT the whole budget and NOT debt; a negative just means today is over the day's allowance. Fixed bills (rent/utilities) don't count against this allowance — they instead lower daily_allowance_agorot for the rest of the cycle. remaining_agorot is the money left for the whole cycle.
 If — and only if — the user asks you to change something (create a goal, change a
 budget, log a transaction, change a setting), append exactly one action block:
 ```action

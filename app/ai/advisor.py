@@ -142,9 +142,10 @@ def apply_action(conn, action: dict, today: dt.date) -> dict:
                 raise ValueError(f"{key} must be an integer 1..31")
             value = str(int(value))
         elif key == "salary_amount_agorot":
-            if not value.isdigit() or int(value) <= 0:
-                raise ValueError("salary_amount_agorot must be a positive"
-                                 " integer (agorot = shekels x 100)")
+            if not value.isdigit() or int(value) <= 0 or int(value) % 100 != 0:
+                raise ValueError("salary_amount_agorot must be a positive whole"
+                                 " number of shekels (agorot = shekels x 100,"
+                                 " divisible by 100)")
             value = str(int(value))
         db.set_setting(conn, key, value)
         return {"summary": f"{key} updated"}

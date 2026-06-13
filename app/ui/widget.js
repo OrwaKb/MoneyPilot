@@ -29,6 +29,10 @@ function setError(on) { $("#w-err").classList.toggle("hidden", !on); }
 function render(ov) {
   const sts = ov.safe_to_spend, cyc = ov.cycle, card = ov.card, bal = ov.balance;
   $("#w-hero").textContent = sts.today_fmt;
+  $("#w-hero").classList.toggle("over", sts.today_agorot < 0);  // negative -> warn
+  // rolling allowance: hero is the running balance, this is the per-day accrual
+  $("#w-allowance").textContent = sts.daily_allowance_fmt
+    ? `+${sts.daily_allowance_fmt}/day` : "";
   // arc fills with cycle progress: (length - days_left) / length
   const frac = cyc.length
     ? Math.min(1, Math.max(0, (cyc.length - sts.days_left) / cyc.length)) : 0;

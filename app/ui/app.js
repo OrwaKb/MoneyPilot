@@ -266,10 +266,16 @@ renderers.overview = async function renderOverview() {
   if (!o.ok) { toast(o.error); return; }
 
   heroCount($("#ov-sts"), o.safe_to_spend.today_fmt);
-  $("#ov-sts-sub").textContent =
-    `${o.safe_to_spend.remaining_fmt} left · ${o.safe_to_spend.days_left} days to salary`
-    + (o.safe_to_spend.goal_reserve_agorot > 0
-       ? ` · ${o.safe_to_spend.goal_reserve_fmt}/mo held for goals` : "");
+  $("#ov-sts").classList.toggle("over", o.safe_to_spend.today_agorot < 0);
+  const sts = o.safe_to_spend;
+  const subParts = [
+    `+${sts.daily_allowance_fmt}/day`,
+    `${sts.remaining_fmt} left this cycle`,
+    `${sts.days_left} days to salary`,
+  ];
+  if (sts.goal_reserve_agorot > 0)
+    subParts.push(`${sts.goal_reserve_fmt}/mo held for goals`);
+  $("#ov-sts-sub").textContent = subParts.join(" · ");
   const pct = Math.min(100,
     Math.round(100 * o.cycle.day_index / o.cycle.length));
   dialTicks();
@@ -643,6 +649,99 @@ $("#ch-new").addEventListener("click", () => {
 $("#ch-send").addEventListener("click", chatSend);
 $("#ch-input").addEventListener("keydown",
   (e) => { if (e.key === "Enter") chatSend(); });
+
+/* --- SETTINGS ------------------------------------------------------------- */
+// Rendered lazily on tab open (NOT registered in `renderers`) so a refreshAll
+// triggered elsewhere can't wipe edits you're in the middle of typing.
+async function renderSettings() {
+  const res = await api("get_app_settings");
+  if (!res.ok) { toast(res.error); return; }
+  const s = res.settings || {};
+  $("#set-name").value = s.user_name || "";
+  $("#set-salary").value =
+    s.salary_amount_agorot ? Math.round(Number(s.salary_amount_agorot) / 100) : "";
+  $("#set-salary-day").value = s.salary_day || "";
+  $("#set-card-day").value = s.card_charge_day || "";
+  $("#set-paymethod").value =
+    ["card", "cash", "transfer"].includes(s.default_payment_method)
+      ? s.default_payment_method : "card";
+  const budgets = res.budgets || {};            // { "<cat_id>": agorot }
+  $("#set-budgets").innerHTML = (res.categories || [])
+    .filter((c) => !c.is_income)
+    .map((c) => {
+      const ag = Number(budgets[String(c.id)] || 0);
+      const val = ag ? Math.round(ag / 100) : "";
+      return `<label class="set-budget-row" data-cat-id="${Number(c.id)}" data-prev="${ag}">
+        <span>${esc(c.emoji)} ${esc(c.name)}${c.is_fixed ? " · fixed" : ""}</span>
+        <input class="set-input set-budget" type="number" min="1" step="1"
+               inputmode="numeric" value="${esc(val)}" placeholder="—"></label>`;
+    }).join("");
+}
+
+$('[data-tab="settings"]').addEventListener("click", renderSettings);
+
+$("#set-save").addEventListener("click", async () => {
+  const status = $("#set-status");
+  status.classList.remove("err");
+  const errs = [];
+  const salary = parseShekels($("#set-salary").value);     // whole shekels, > 0
+  if (!salary.n) errs.push("salary must be a whole number above 0");
+  const dayN = Number($("#set-salary-day").value);
+  const cardN = Number($("#set-card-day").value);
+  if (!Number.isInteger(dayN) || dayN < 1 || dayN > 31)
+    errs.push("salary day must be 1–31");
+  if (!Number.isInteger(cardN) || cardN < 1 || cardN > 31)
+    errs.push("card day must be 1–31");
+
+  // budgets: set valid amounts, clear blanks that previously had a value
+  const ops = [];
+  let budgetBad = false;
+  $$("#set-budgets .set-budget-row").forEach((row) => {
+    const cid = Number(row.dataset.catId);
+    const prev = Number(row.dataset.prev) || 0;
+    const inp = row.querySelector(".set-budget");
+    const r = parseShekels(inp.value);
+    if (r.bad) { budgetBad = true; inp.classList.add("bad"); return; }
+    inp.classList.remove("bad");
+    if (r.n) ops.push(["set_category_budget", cid, r.n]);
+    else if (prev > 0) ops.push(["remove_category_budget", cid]);
+  });
+  if (budgetBad) errs.push("a budget must be a whole number above 0 (or blank)");
+
+  if (errs.length) {
+    status.textContent = errs[0]; status.classList.add("err");
+    toast(errs[0]); return;
+  }
+
+  const r1 = await api("save_settings", {
+    user_name: $("#set-name").value.trim(),
+    salary_amount_agorot: String(salary.n * 100),
+    salary_day: String(dayN),
+    card_charge_day: String(cardN),
+    default_payment_method: $("#set-paymethod").value,
+  });
+  if (!r1.ok) {
+    toast(r1.error); status.textContent = r1.error; status.classList.add("err");
+    return;
+  }
+  for (const [method, ...args] of ops) {
+    const r = await api(method, ...args);
+    if (!r.ok) {
+      // save_settings already persisted; a budget op failed mid-loop. Re-sync
+      // the form + cockpit to what ACTUALLY persisted so the UI never silently
+      // disagrees with the db, and surface the failure.
+      toast(r.error);
+      status.textContent = r.error; status.classList.add("err");
+      await renderSettings();
+      await refreshAll();
+      return;
+    }
+  }
+  status.textContent = "saved ✓";
+  toast("settings saved");
+  await renderSettings();      // refresh data-prev so a later clear still fires
+  await refreshAll();          // reflect new salary/budgets across the cockpit
+});
 
 /* --- ONBOARDING -------------------------------------------------------------------- */
 window.startOnboarding = function startOnboarding() {

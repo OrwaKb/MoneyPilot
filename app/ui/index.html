@@ -98,6 +98,7 @@
   <button class="tab" data-tab="ledger">LEDGER</button>
   <button class="tab" data-tab="goals">GOALS</button>
   <button class="tab" data-tab="advisor">ADVISOR</button>
+  <button class="tab" data-tab="settings">SETTINGS</button>
 </nav>
 
 <main>
@@ -199,6 +200,47 @@
       <input id="gl-target" type="number" placeholder="target ₪">
       <input id="gl-date" type="date">
       <button id="gl-save" class="btn primary">CREATE</button>
+    </div>
+  </section>
+
+  <section id="tab-settings" class="tabpane hidden">
+    <div class="settings-grid">
+      <div class="panel">
+        <div class="label">PROFILE</div>
+        <label class="set-row"><span>Name</span>
+          <input id="set-name" class="set-input" autocomplete="off"></label>
+      </div>
+      <div class="panel">
+        <div class="label">INCOME &amp; CYCLE</div>
+        <label class="set-row"><span>Monthly salary (₪)</span>
+          <input id="set-salary" class="set-input" type="number" min="1" step="1"
+                 inputmode="numeric"></label>
+        <label class="set-row"><span>Salary day</span>
+          <input id="set-salary-day" class="set-input" type="number" min="1"
+                 max="31"></label>
+        <label class="set-row"><span>Card charge day</span>
+          <input id="set-card-day" class="set-input" type="number" min="1"
+                 max="31"></label>
+      </div>
+      <div class="panel">
+        <div class="label">DEFAULT PAYMENT METHOD</div>
+        <select id="set-paymethod" class="set-input">
+          <option value="card">card</option>
+          <option value="cash">cash</option>
+          <option value="transfer">transfer</option>
+        </select>
+        <div class="sub">used when a logged entry doesn't say how you paid</div>
+      </div>
+      <div class="panel wide">
+        <div class="label">BUDGETS // ₪ PER CYCLE</div>
+        <div id="set-budgets"></div>
+        <div class="sub">blank clears a budget · budgets are trackers — they
+          don't change safe-to-spend</div>
+      </div>
+    </div>
+    <div class="settings-actions">
+      <span id="set-status" class="sub"></span>
+      <button id="set-save" class="btn primary">SAVE CHANGES</button>
     </div>
   </section>
 

@@ -123,6 +123,41 @@ def test_daily_backup_written_once_and_pruned(conn, tmp_path):
     assert len(list(bdir.glob("ledger-*.json"))) == 30
 
 
+def test_export_json_takes_atomic_snapshot(tmp_path):
+    # a concurrent commit landing mid-export (the widget process) must be
+    # invisible to the export — one consistent snapshot, never a torn read.
+    main = db.connect(tmp_path / "x.db"); db.init_db(main)
+    other = db.connect(tmp_path / "x.db"); db.init_db(other)
+    db.add_transaction(main, effective_date=D, amount_agorot=-100,
+                       direction="expense")
+    base = len(db.export_json(main)["transactions"])
+
+    class _Hook:
+        # forwards to the real conn but fires a concurrent insert right after the
+        # FIRST SELECT — so a non-atomic export would see it in a later table.
+        def __init__(self, real):
+            self._real, self._fired = real, False
+
+        @property
+        def in_transaction(self):
+            return self._real.in_transaction
+
+        def commit(self):
+            return self._real.commit()
+
+        def execute(self, sql, *a, **k):
+            cur = self._real.execute(sql, *a, **k)
+            if not self._fired and sql.strip().upper().startswith("SELECT"):
+                self._fired = True
+                db.add_transaction(other, effective_date=D, amount_agorot=-999,
+                                   direction="expense")    # concurrent commit
+            return cur
+
+    snap = db.export_json(_Hook(main))
+    assert len(snap["transactions"]) == base          # concurrent row excluded
+    assert len(db.export_json(main)["transactions"]) == base + 1  # now visible
+
+
 def test_import_rejects_non_backup(conn):
     db.set_setting(conn, "salary_day", "10")
     with pytest.raises(ValueError):

@@ -318,6 +318,11 @@ def set_budget(conn, category_id: int, amount_agorot: int) -> None:
     conn.commit()
 
 
+def delete_budget(conn, category_id: int) -> None:
+    conn.execute("DELETE FROM budgets WHERE category_id=?", (category_id,))
+    conn.commit()
+
+
 def get_budgets(conn) -> dict:
     return {r["category_id"]: r["amount_agorot"]
             for r in conn.execute("SELECT * FROM budgets")}
@@ -394,8 +399,20 @@ _EXPORT_TABLES = ["categories", "goals", "transactions", "category_rules",
 
 def export_json(conn) -> dict:
     out = {"schema_version": SCHEMA_VERSION}
-    for t in _EXPORT_TABLES:
-        out[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}")]
+    # One consistent snapshot for ALL tables: under WAL a single deferred
+    # transaction fixes the read view at the first SELECT, so a concurrent
+    # writer (the second widget process committing an add_entry/undo) can't tear
+    # the backup between two table reads. Only open one if not already inside a
+    # transaction.
+    started = not conn.in_transaction
+    if started:
+        conn.execute("BEGIN")
+    try:
+        for t in _EXPORT_TABLES:
+            out[t] = [dict(r) for r in conn.execute(f"SELECT * FROM {t}")]
+    finally:
+        if started:
+            conn.commit()
     return out
 
 

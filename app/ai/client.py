@@ -61,6 +61,10 @@ def _via_cli(prompt: str, system, timeout_s: int) -> str:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired as e:
         raise AIUnavailable("claude CLI timed out") from e
+    except OSError as e:
+        # the exe exists but fails to launch (perms, bad image, ENOEXEC…):
+        # surface as AIUnavailable so the advisor falls back gracefully
+        raise AIUnavailable(f"claude CLI failed to launch: {e}") from e
     if res.returncode != 0:
         raise AIUnavailable(f"claude CLI exit {res.returncode}: {res.stderr[:200]}")
     try:

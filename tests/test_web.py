@@ -75,8 +75,9 @@ def _make_app(tmp_path):
     store = auth.UserStore(tmp_path / "users.json")
     store.add("alice", "pw1")
     store.add("bob", "pw2")
+    # 0 brute-force delay so the throttle integration tests stay fast
     return create_app(base_dir=tmp_path, users_path=tmp_path / "users.json",
-                      secret_key="test-secret")
+                      secret_key="test-secret", login_block_delay_s=0.0)
 
 
 def _login(c, user, pw):
@@ -206,6 +207,87 @@ def test_login_throttle_no_lockout_of_valid_credentials(tmp_path):
         good = _login(c, "alice", "pw1")                     # ...valid still works
         assert good.status_code == 303 and good.headers["location"].endswith("/")
         assert c.post("/api/get_overview", json=[]).status_code == 200
+
+
+def test_throttle_penalty_sleeps_when_configured():
+    # once over the limit, a wrong guess pays a delay so brute force can't run at
+    # full speed; with no delay configured it is a no-op
+    import asyncio
+    from web.server import LoginThrottle
+    calls = []
+
+    async def fake_sleep(s):
+        calls.append(s)
+
+    th = LoginThrottle(block_delay_s=0.7, sleep_fn=fake_sleep)
+    asyncio.run(th.penalty())
+    assert calls == [0.7]
+    th0 = LoginThrottle(block_delay_s=0.0, sleep_fn=fake_sleep)
+    calls.clear()
+    asyncio.run(th0.penalty())
+    assert calls == []
+
+
+def test_internal_error_sanitized_on_web(tmp_path, monkeypatch):
+    # an unexpected internal error must NOT leak its message to the remote client
+    from app.engine import insights
+    monkeypatch.setattr(insights, "fact_pack",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("boom /secret/path/ledger.db")))
+    with TestClient(_make_app(tmp_path)) as c:
+        _login(c, "alice", "pw1")
+        body = c.post("/api/get_overview", json=[]).json()
+        assert body["ok"] is False
+        assert "secret" not in (body.get("error") or "")
+        assert "ledger.db" not in (body.get("error") or "")
+
+
+def test_user_error_passes_through_on_web(tmp_path):
+    # a deliberate validation error is still shown verbatim (it's meant for them)
+    with TestClient(_make_app(tmp_path)) as c:
+        _login(c, "alice", "pw1")
+        body = c.post("/api/save_goal", json=[{"name": "", "target_ils": 100}]).json()
+        assert body["ok"] is False and "name" in body["error"].lower()
+
+
+def test_invalid_username_account_cannot_get_a_session(tmp_path):
+    # a name that slipped into users.json (hand-edited / pre-validation) must NOT
+    # get a working session: fresh_api would reject it and 500 every /api call.
+    from web.server import create_app
+    store = auth.UserStore(tmp_path / "users.json")
+    store.add("Bad Name", "pw")            # bypasses the CLI's valid_username gate
+    app = create_app(base_dir=tmp_path, users_path=tmp_path / "users.json",
+                     secret_key="test-secret", login_block_delay_s=0.0)
+    with TestClient(app) as c:
+        r = c.post("/login", data={"username": "Bad Name", "password": "pw"},
+                   follow_redirects=False)
+        assert r.status_code == 303 and "error" in r.headers["location"]
+        # never reaches fresh_api -> no 500; just unauthenticated
+        assert c.post("/api/get_overview", json=[]).status_code == 401
+
+
+def test_valid_username_still_logs_in(tmp_path):
+    # the guard must not refuse a normal lowercase account
+    with TestClient(_make_app(tmp_path)) as c:
+        assert _login(c, "alice", "pw1").status_code == 303
+        assert c.post("/api/get_overview", json=[]).status_code == 200
+
+
+def test_unknown_user_verify_single_pbkdf2(tmp_path, monkeypatch):
+    # unknown and known usernames must do the SAME pbkdf2 work (no timing oracle)
+    import web.auth as auth_mod
+    store = auth_mod.UserStore(tmp_path / "u.json")
+    store.add("alice", "pw")
+    calls = []
+    real = auth_mod.hashlib.pbkdf2_hmac
+    monkeypatch.setattr(auth_mod.hashlib, "pbkdf2_hmac",
+                        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    store.verify("ghost", "x")
+    unknown = len(calls)
+    calls.clear()
+    store.verify("alice", "wrong")
+    known = len(calls)
+    assert unknown == known == 1
 
 
 def test_login_throttle_is_per_username(tmp_path):

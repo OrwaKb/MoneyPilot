@@ -34,10 +34,17 @@ def fact_pack(conn, today: dt.date) -> dict:
         "weekday": today.strftime("%A"),
         "cycle": _iso_dict(cyc),
         "safe_to_spend": {
+            # today_agorot is the ROLLING daily-allowance balance: it banks
+            # unspent days and goes negative when you overspend (recovers as the
+            # allowance accrues). daily_allowance_agorot is the per-day accrual.
             "today_agorot": sts["today_agorot"],
             "today_fmt": fmt_ils(sts["today_agorot"]),
+            "daily_allowance_agorot": sts["daily_allowance_agorot"],
+            "daily_allowance_fmt": fmt_ils(sts["daily_allowance_agorot"]),
             "remaining_agorot": sts["remaining_agorot"],
             "remaining_fmt": fmt_ils(sts["remaining_agorot"]),
+            "cycle_spent_agorot": sts["cycle_spent_agorot"],
+            "cycle_spent_fmt": fmt_ils(sts["cycle_spent_agorot"]),
             "available_agorot": sts["available_agorot"],
             "available_fmt": fmt_ils(sts["available_agorot"]),
             "goal_reserve_agorot": sts["goal_reserve_agorot"],
