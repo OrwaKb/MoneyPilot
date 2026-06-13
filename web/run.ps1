@@ -13,19 +13,42 @@ if (-not (Test-Path $py)) {
   Write-Host "Run setup first (see README)." -ForegroundColor Red
   exit 1
 }
-if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
+
+# Resolve cloudflared. The winget package does not reliably add it to PATH (and
+# a session opened before install has a stale PATH), so fall back to its known
+# install locations before giving up.
+$cf = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
+if (-not $cf) {
+  $candidates = @(
+    (Join-Path $env:ProgramFiles 'cloudflared\cloudflared.exe'),
+    (Join-Path ${env:ProgramFiles(x86)} 'cloudflared\cloudflared.exe'),
+    (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\cloudflared.exe')
+  )
+  $cf = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (-not $cf) {
+  $pkg = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
+  if (Test-Path $pkg) {
+    $hit = Get-ChildItem $pkg -Recurse -Filter cloudflared.exe -ErrorAction SilentlyContinue |
+           Select-Object -First 1
+    if ($hit) { $cf = $hit.FullName }
+  }
+}
+if (-not $cf) {
   Write-Host "cloudflared not found. Install it once with:" -ForegroundColor Yellow
   Write-Host "  winget install --id Cloudflare.cloudflared" -ForegroundColor Yellow
+  Write-Host "If you just installed it, open a NEW terminal so PATH refreshes, then re-run." -ForegroundColor Yellow
   exit 1
 }
 
 Write-Host "Starting MoneyPilot Web on http://127.0.0.1:$port ..."
+Write-Host "Using cloudflared: $cf"
 $uvArgs = @("-m", "uvicorn", "web.server:get_app", "--factory",
             "--host", "127.0.0.1", "--port", "$port")
 $uv = Start-Process -PassThru -NoNewWindow $py -ArgumentList $uvArgs
 try {
   Write-Host "Opening Cloudflare tunnel. Share the https://<random>.trycloudflare.com URL it prints below with your friend."
-  cloudflared tunnel --url "http://127.0.0.1:$port"
+  & $cf tunnel --url "http://127.0.0.1:$port"
 } finally {
   if ($uv -and -not $uv.HasExited) { Stop-Process -Id $uv.Id -Force }
   Write-Host "Server stopped."
