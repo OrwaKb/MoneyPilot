@@ -4,7 +4,12 @@
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
-const ready = new Promise((res) => window.addEventListener("pywebviewready", res));
+// Desktop (pywebview) loads index.html via file://; the web server serves it
+// over http(s). Detect the mode once and branch the bridge accordingly.
+const WEB = location.protocol === "http:" || location.protocol === "https:";
+const ready = WEB
+  ? Promise.resolve()
+  : new Promise((res) => window.addEventListener("pywebviewready", res));
 
 // Fix 4: module-level store for pending advisor action card
 let pendingActionEl = null;
@@ -20,7 +25,17 @@ let briefingText = null;
 
 async function api(method, ...args) {
   await ready;
-  return window.pywebview.api[method](...args);
+  if (!WEB) return window.pywebview.api[method](...args);
+  const r = await fetch("/api/" + method, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args),
+  });
+  if (r.status === 401) {            // session expired -> back to login
+    location.href = "/login";
+    return new Promise(() => {});    // never resolves; navigation takes over
+  }
+  return r.json();
 }
 
 const renderers = {};            // tab renderers, registered by later tasks
@@ -397,6 +412,10 @@ $("#lg-export").addEventListener("click", async () => {
   const now = new Date();
   const month = $("#lg-month").value ||
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  if (WEB) {                          // browser download via the dedicated route
+    location.href = "/api/export_csv?month=" + encodeURIComponent(month);
+    return;
+  }
   const res = await api("export_csv", month);
   toast(res.ok ? "exported: " + res.path : res.error);
 });
