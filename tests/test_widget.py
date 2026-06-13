@@ -45,3 +45,69 @@ def test_is_onboarded_wrapped_in_dict(wapi, tmp_path):
     # a fresh, un-onboarded ledger (no salary_day) reports False
     a2 = Api(tmp_path / "blank.db", backup_dir=tmp_path / "b2")
     assert WidgetApi(a2).is_onboarded() == {"ok": True, "onboarded": False}
+
+
+class _FakeWindow:
+    def __init__(self):
+        self.x, self.y, self.width, self.height = 40, 60, 300, 300
+        self.on_top = True
+        self.restored = self.shown = self.destroyed = False
+    def restore(self): self.restored = True
+    def show(self): self.shown = True
+    def destroy(self): self.destroyed = True
+
+
+def test_geometry_round_trips_through_settings(wapi):
+    wapi._window = _FakeWindow()
+    wapi._window.x, wapi._window.y, wapi._window.on_top = 111, 222, False
+    assert wapi.save_geometry()["ok"] is True
+    assert db.get_setting(wapi._api.conn, "widget_x") == "111"
+    assert db.get_setting(wapi._api.conn, "widget_y") == "222"
+    assert db.get_setting(wapi._api.conn, "widget_on_top") == "0"
+
+
+def test_set_pin_updates_window_and_setting(wapi):
+    wapi._window = _FakeWindow()
+    assert wapi.set_pin(False)["ok"] is True
+    assert wapi._window.on_top is False
+    assert db.get_setting(wapi._api.conn, "widget_on_top") == "0"
+
+
+def test_open_main_app_focuses_running_cockpit(wapi, monkeypatch):
+    import app.widget as w
+    monkeypatch.setattr(w, "_try_focus_running", lambda ddir: True)
+    called = {"popen": False}
+    monkeypatch.setattr(w.subprocess, "Popen",
+                        lambda *a, **k: called.__setitem__("popen", True))
+    res = wapi.open_main_app()
+    assert res == {"ok": True, "focused": True}
+    assert called["popen"] is False          # focused existing, did not spawn
+
+
+def test_open_main_app_spawns_when_cockpit_absent(wapi, monkeypatch):
+    import app.widget as w
+    monkeypatch.setattr(w, "_try_focus_running", lambda ddir: False)
+    spawned = {}
+    monkeypatch.setattr(w.subprocess, "Popen",
+                        lambda args, **k: spawned.update(args=args))
+    res = wapi.open_main_app()
+    assert res == {"ok": True, "focused": False}
+    assert spawned["args"][1:] == ["-m", "app"]   # launched the cockpit module
+
+
+def test_second_launch_focuses_running_widget(monkeypatch, tmp_path):
+    import app.widget as w
+    sent = {}
+    class _Sock:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def sendall(self, b): sent["b"] = b
+    (tmp_path / w.WIDGET_PORT_FILE).write_text("54321")
+    monkeypatch.setattr(w.socket, "create_connection", lambda *a, **k: _Sock())
+    assert w._try_focus_running_widget(tmp_path) is True
+    assert sent["b"] == b"FOCUS\n"
+
+
+def test_no_lockfile_means_no_running_widget(tmp_path):
+    import app.widget as w
+    assert w._try_focus_running_widget(tmp_path) is False
