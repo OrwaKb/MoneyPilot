@@ -12,6 +12,12 @@ Then double-click **MoneyPilot** on the Desktop.
 Type into the entry bar: `45 falafel with karim` · `salary landed` ·
 `put 500 in drone fund`. Everything else is tabs.
 
+## Widget
+`pythonw -m app.widget` floats an always-on-top gauge with today's safe-to-spend
+and a quick-add box; it runs as its own process on the same ledger, so it stays
+up even when the cockpit is closed. `setup.ps1` adds a **MoneyPilot Widget**
+shortcut; pass `-Autostart` to also launch it at login.
+
 ## Dev
     .venv\Scripts\python -m pytest          # all tests, offline, AI mocked
     .venv\Scripts\python -m app --dev       # seeded fake ledger + DevTools
