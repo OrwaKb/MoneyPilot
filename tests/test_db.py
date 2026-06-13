@@ -48,3 +48,10 @@ def test_set_setting_overwrites(conn):
     db.set_setting(conn, "k", "1")
     db.set_setting(conn, "k", "2")
     assert db.get_setting(conn, "k") == "2"
+
+
+def test_connect_sets_busy_timeout(tmp_path):
+    # 5000 ms lets a second process wait for the WAL writer instead of
+    # failing SQLITE_BUSY immediately — required for the widget process.
+    conn = db.connect(tmp_path / "x.db")
+    assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000

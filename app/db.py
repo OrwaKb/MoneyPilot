@@ -68,6 +68,11 @@ def connect(path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(p), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # Explicit (Python's sqlite3 already defaults this to 5000 via timeout=5.0):
+    # WAL permits one writer, so the widget's second process must wait for the
+    # cockpit's writer instead of failing SQLITE_BUSY. Stated here so it can't
+    # silently regress if connect()'s timeout is ever changed.
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
