@@ -26,6 +26,17 @@ def test_fact_pack_shape_and_json_safe(seeded):
         assert key in fp, key
     json.dumps(fp)  # must be JSON-serializable as-is
 
+def test_safe_to_spend_surfaces_goal_reserve(seeded):
+    # the deadline-goal savings reserve is exposed (agorot + formatted) so the
+    # cockpit/widget can show why safe-to-spend is lower
+    from app.models import fmt_ils
+    db.add_goal(seeded, name="Drone", type="save_by_date",
+                target_agorot=300000, target_date=dt.date(2026, 9, 9))
+    sts = insights.fact_pack(seeded, TODAY)["safe_to_spend"]
+    assert sts["goal_reserve_agorot"] > 0
+    assert sts["goal_reserve_fmt"] == fmt_ils(sts["goal_reserve_agorot"])
+
+
 def test_balance_math(seeded):
     # opening 500000 + income 900000 − expense 4500 − earmarked 171000
     db.add_transaction(seeded, effective_date=TODAY, amount_agorot=900000,

@@ -34,6 +34,10 @@ function render(ov) {
     ? Math.min(1, Math.max(0, (cyc.length - sts.days_left) / cyc.length)) : 0;
   $("#w-gauge").style.strokeDashoffset = String(100 - frac * 100);
   $("#w-day").textContent = "DAY " + (cyc.day_index ?? "—");
+  const reserved = sts.goal_reserve_agorot > 0;
+  const note = $("#w-goalnote");
+  note.textContent = reserved ? `${sts.goal_reserve_fmt}/mo held for goals` : "";
+  note.classList.toggle("hidden", !reserved);
   $("#w-balance").textContent = bal.available_fmt;
   $("#w-card").textContent = card.total_fmt + " · " + card.days_to_charge + "d";
 }

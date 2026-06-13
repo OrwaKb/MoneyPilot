@@ -267,7 +267,9 @@ renderers.overview = async function renderOverview() {
 
   heroCount($("#ov-sts"), o.safe_to_spend.today_fmt);
   $("#ov-sts-sub").textContent =
-    `${o.safe_to_spend.remaining_fmt} left · ${o.safe_to_spend.days_left} days to salary`;
+    `${o.safe_to_spend.remaining_fmt} left · ${o.safe_to_spend.days_left} days to salary`
+    + (o.safe_to_spend.goal_reserve_agorot > 0
+       ? ` · ${o.safe_to_spend.goal_reserve_fmt}/mo held for goals` : "");
   const pct = Math.min(100,
     Math.round(100 * o.cycle.day_index / o.cycle.length));
   dialTicks();

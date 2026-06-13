@@ -38,6 +38,8 @@ body { background: var(--bg); color: var(--txt); font-family: var(--mono);
 .w-hero { color: var(--accent); font-size: 30px; font-weight: bold;
   text-shadow: 0 0 22px var(--accent-glow); line-height: 1.1; }
 
+.w-goalnote { text-align: center; color: var(--amber); font-size: 10px;
+  letter-spacing: .5px; margin: -2px 0 6px; opacity: .85; }
 .w-rows { display: flex; gap: 8px; margin: 2px 0 8px; }
 .w-row { flex: 1; background: var(--panel); border: 1px solid var(--line);
   border-radius: 7px; padding: 6px 9px; }

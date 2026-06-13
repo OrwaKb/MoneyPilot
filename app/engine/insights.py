@@ -50,6 +50,8 @@ def fact_pack(conn, today: dt.date) -> dict:
             "remaining_agorot": sts["remaining_agorot"],
             "remaining_fmt": fmt_ils(sts["remaining_agorot"]),
             "pool_agorot": sts["pool_agorot"],
+            "goal_reserve_agorot": sts["goal_reserve_agorot"],
+            "goal_reserve_fmt": fmt_ils(sts["goal_reserve_agorot"]),
             "days_left": sts["days_left"],
         },
         "categories": budget.category_status(conn, today),
