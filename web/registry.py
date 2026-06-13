@@ -5,6 +5,7 @@ import re
 import threading
 from pathlib import Path
 
+from app import db
 from app.api import Api
 
 _VALID = re.compile(r"^[a-z0-9_-]{1,32}$")
@@ -19,12 +20,18 @@ def valid_username(name: str) -> bool:
 
 
 class Registry:
-    """One cached Api per user, each bound to users/<name>/ledger.db."""
+    """Per-request Api/connections, each bound to users/<name>/ledger.db.
+
+    A user's schema is created once; every request then gets its OWN sqlite
+    connection (WAL + busy_timeout). That replaces the old single-shared-
+    connection-plus-lock model, under which any AI-bound request (add_entry,
+    chat_send, get_briefing, …) held a per-user lock through its network call
+    and froze that user's other requests — the Cloudflare "context canceled"
+    storm. Independent connections need no serialization lock."""
 
     def __init__(self, base_dir):
         self.base = Path(base_dir)
-        self._apis: dict[str, Api] = {}
-        self._dispatch_locks: dict[str, threading.Lock] = {}
+        self._initialized: set[str] = set()
         self._lock = threading.Lock()
 
     def user_dir(self, username: str) -> Path:
@@ -32,24 +39,22 @@ class Registry:
             raise ValueError(f"invalid username: {username!r}")
         return self.base / username
 
-    def get_api(self, username: str) -> Api:
-        ud = self.user_dir(username)          # validates before any caching
+    def _ensure_initialized(self, ud: Path, username: str) -> None:
+        """Create the user's ledger schema once (idempotent), so per-request
+        connections can skip the DDL and just open."""
         with self._lock:
-            api = self._apis.get(username)
-            if api is None:
-                api = Api(ud / "ledger.db", backup_dir=ud / "backups")
-                self._apis[username] = api
-            return api
+            if username in self._initialized:
+                return
+            conn = db.connect(ud / "ledger.db")
+            db.init_db(conn)
+            conn.close()
+            self._initialized.add(username)
 
-    def dispatch_lock(self, username: str) -> threading.Lock:
-        """A per-user lock serializing every request that touches that user's
-        single sqlite connection. FastAPI runs the sync Api methods in a
-        threadpool, so without this two concurrent same-user requests would use
-        one connection from two threads and raise transaction-state errors.
-        Per-user, so different users still run fully in parallel."""
-        with self._lock:
-            lk = self._dispatch_locks.get(username)
-            if lk is None:
-                lk = threading.Lock()
-                self._dispatch_locks[username] = lk
-            return lk
+    def fresh_api(self, username: str) -> Api:
+        """An Api on its OWN connection for ONE request. Per-request connections
+        let a slow AI call run without blocking this user's other requests — no
+        shared connection, no serialization lock. The caller MUST close
+        ``api.conn`` when the request finishes."""
+        ud = self.user_dir(username)          # validates the name first
+        self._ensure_initialized(ud, username)
+        return Api(ud / "ledger.db", backup_dir=ud / "backups", init=False)

@@ -34,23 +34,26 @@ from web.registry import Registry
 
 def test_registry_creates_isolated_ledgers(tmp_path):
     reg = Registry(tmp_path)
-    a = reg.get_api("alice")
-    b = reg.get_api("bob")
+    a = reg.fresh_api("alice")
+    b = reg.fresh_api("bob")
     assert a is not b
     assert (tmp_path / "alice" / "ledger.db").exists()
     assert (tmp_path / "bob" / "ledger.db").exists()
 
 
-def test_registry_caches_same_instance(tmp_path):
+def test_fresh_api_gives_distinct_connections(tmp_path):
+    # per-request connections: every call is its own Api on its own connection,
+    # so a slow request can't hold a shared connection hostage
     reg = Registry(tmp_path)
-    assert reg.get_api("alice") is reg.get_api("alice")
+    a, b = reg.fresh_api("alice"), reg.fresh_api("alice")
+    assert a is not b and a.conn is not b.conn
 
 
 def test_registry_rejects_unsafe_username(tmp_path):
     reg = Registry(tmp_path)
     for bad in ["../escape", "a/b", "", "x" * 33, "Bad Name"]:
         with pytest.raises(ValueError):
-            reg.get_api(bad)
+            reg.fresh_api(bad)
 
 
 from fastapi.testclient import TestClient as _FastApiTestClient
@@ -214,17 +217,54 @@ def test_login_throttle_is_per_username(tmp_path):
         assert good.status_code == 303 and good.headers["location"].endswith("/")
 
 
-def test_dispatch_lock_is_per_user(tmp_path):
-    reg = Registry(tmp_path)
-    assert reg.dispatch_lock("alice") is reg.dispatch_lock("alice")
-    assert reg.dispatch_lock("alice") is not reg.dispatch_lock("bob")
+def test_slow_ai_call_does_not_block_other_requests(tmp_path, monkeypatch):
+    # Regression for the Cloudflare "context canceled" storm: an AI-bound
+    # request (here add_entry, which calls ask_claude) must NOT freeze this
+    # user's other requests. A slow parse and a concurrent get_overview run
+    # against their OWN connections, so the overview returns promptly.
+    import threading
+    import time
+    entered = threading.Event()      # set once the slow AI call is in flight
+    release = threading.Event()      # lets the slow call finish
+
+    def slow_ask(*a, **k):
+        entered.set()
+        release.wait(timeout=5)
+        raise ai_client.AIUnavailable("slow")   # -> fast regex fallback stores it
+
+    monkeypatch.setattr(ai_client, "ask_claude", slow_ask)
+    app = _make_app(tmp_path)
+
+    def slow_request():
+        with TestClient(app) as c:
+            _login(c, "alice", "pw1")
+            c.post("/api/add_entry", json=["45 coffee"])
+
+    ta = threading.Thread(target=slow_request)
+    ta.start()
+    assert entered.wait(2), "slow request never reached the AI call"
+
+    # safety net so a serialized (buggy) server can't hang the test forever
+    release_timer = threading.Timer(2.0, release.set)
+    release_timer.start()
+    with TestClient(app) as c2:
+        _login(c2, "alice", "pw1")
+        t0 = time.monotonic()
+        r = c2.post("/api/get_overview", json=[])
+        elapsed = time.monotonic() - t0
+    release.set()
+    release_timer.cancel()
+    ta.join(5)
+
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert elapsed < 1.5, f"get_overview blocked {elapsed:.2f}s behind a slow AI call"
 
 
 def test_concurrent_same_user_requests_do_not_error(tmp_path, monkeypatch):
-    # Regression: one cached Api per user holds ONE sqlite connection, and
-    # FastAPI runs sync methods in a threadpool. Without per-user serialization,
-    # concurrent same-user reads+writes race the connection and raise
-    # transaction-state errors. The dispatch lock must keep them clean.
+    # Regression: FastAPI runs sync methods in a threadpool. Each request now
+    # gets its OWN connection (WAL + busy_timeout), so concurrent same-user
+    # reads+writes don't race a shared connection or raise transaction-state
+    # errors — and no serialization lock is needed to keep them clean.
     monkeypatch.setattr(ai_client, "ask_claude",
                         lambda *a, **k: (_ for _ in ()).throw(
                             ai_client.AIUnavailable("offline")))

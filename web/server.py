@@ -117,14 +117,15 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
             args = []
         if not isinstance(args, list):
             args = [] if args is None else [args]
-        api = registry.get_api(user)
-        dlock = registry.dispatch_lock(user)
 
         def _call():
-            # Serialize per-user access to the single shared sqlite connection;
-            # the threadpool runs requests in parallel otherwise.
-            with dlock:
+            # Own connection per request (created+closed on this threadpool
+            # thread): a slow AI-bound call no longer blocks the user's others.
+            api = registry.fresh_api(user)
+            try:
                 return getattr(api, method)(*args)
+            finally:
+                api.conn.close()
 
         result = await run_in_threadpool(_call)
         return JSONResponse(result)
@@ -134,13 +135,14 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
         user = request.session.get("user")
         if not user:
             return RedirectResponse("/login", status_code=303)
-        api = registry.get_api(user)
         out_dir = registry.user_dir(user) / "exports"
-        dlock = registry.dispatch_lock(user)
 
         def _export():
-            with dlock:
+            api = registry.fresh_api(user)
+            try:
                 return api.export_csv(month, str(out_dir))
+            finally:
+                api.conn.close()
 
         res = await run_in_threadpool(_export)
         if not res.get("ok"):

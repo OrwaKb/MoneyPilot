@@ -36,9 +36,11 @@ def _txn_dict(row) -> dict:
 
 
 class Api:
-    def __init__(self, db_path, *, backup_dir, today_fn=dt.date.today):
+    def __init__(self, db_path, *, backup_dir, today_fn=dt.date.today,
+                 init=True):
         self.conn = db.connect(db_path)
-        db.init_db(self.conn)
+        if init:                       # web uses per-request connections and
+            db.init_db(self.conn)      # inits the schema once per user instead
         self.backup_dir = Path(backup_dir)
         self._today = today_fn
         self._lock = threading.Lock()
