@@ -41,14 +41,18 @@ Untouched: `app/__main__.py`, the engine, `app/ai/*`, the schema.
 - [ ] **Step 1: Create `requirements-web.txt`**
 
 ```
-fastapi==0.115.6
+# IMPORTANT — starlette constraint: claude-agent-sdk pulls in sse-starlette,
+# which needs a modern starlette (>=0.49). An old FastAPI (e.g. 0.115) pins
+# starlette down to 0.41.x and BREAKS the AI integration. Keep FastAPI modern.
+fastapi==0.136.3
+starlette>=1.3.1
 uvicorn==0.34.0
 httpx==0.28.1
 python-multipart==0.0.20
 itsdangerous==2.2.0
 ```
 
-(`itsdangerous` is required by Starlette `SessionMiddleware`; `python-multipart` by form parsing; `httpx` by `TestClient`.)
+(`itsdangerous` is required by Starlette `SessionMiddleware`; `python-multipart` by form parsing; `httpx` by `TestClient`. FastAPI is pinned to 0.136.3 — not an older release — so it coexists with the modern starlette that `claude-agent-sdk`/`sse-starlette` require; an older FastAPI downgrades starlette and breaks the AI. **Task 1 was completed manually during setup** — these deps are already installed.)
 
 - [ ] **Step 2: Create the package marker**
 
