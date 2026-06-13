@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MoneyPilot Widget</title>
+<link rel="stylesheet" href="widget.css">
+</head>
+<body>
+  <div id="w-titlebar" class="pywebview-drag-region">
+    <span class="w-brand">🧭 MONEYPILOT</span>
+    <span class="w-titleactions">
+      <button id="w-pin" title="keep on top" class="w-iconbtn">📌</button>
+      <button id="w-close" title="close" class="w-iconbtn">✕</button>
+    </span>
+  </div>
+
+  <div id="w-setup" class="hidden">
+    <button id="w-setup-btn" class="w-setup-btn">Set up MoneyPilot →</button>
+  </div>
+
+  <div id="w-main">
+    <div class="w-dialwrap">
+      <svg id="w-dial" viewBox="0 0 200 132" aria-hidden="true">
+        <defs>
+          <linearGradient id="wGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#4ef0c0"/>
+            <stop offset="1" stop-color="#2da8ff"/>
+          </linearGradient>
+        </defs>
+        <path class="w-track" d="M 44.57 118 A 64 64 0 1 1 155.43 118"/>
+        <path id="w-gauge" class="w-fill" pathLength="100"
+              d="M 44.57 118 A 64 64 0 1 1 155.43 118"/>
+        <text id="w-day" class="w-day" x="100" y="120">DAY —</text>
+      </svg>
+      <div class="w-hero-wrap">
+        <div class="w-hero-cap">SAFE TODAY</div>
+        <div id="w-hero" class="w-hero">—</div>
+      </div>
+    </div>
+
+    <div class="w-rows">
+      <div class="w-row"><span class="w-row-cap">BALANCE</span>
+        <span id="w-balance" class="w-row-val">—</span></div>
+      <div class="w-row"><span class="w-row-cap">CARD DUE</span>
+        <span id="w-card" class="w-row-val">—</span></div>
+    </div>
+
+    <div id="w-chip" class="w-chip hidden"></div>
+    <input id="w-add" class="w-add" autocomplete="off"
+           placeholder="45 falafel with karim">
+  </div>
+
+  <span id="w-err" class="w-err hidden" title="couldn't refresh">●</span>
+  <script src="widget.js"></script>
+</body>
+</html>
