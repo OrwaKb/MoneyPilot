@@ -1,0 +1,33 @@
+# web/registry.py
+from __future__ import annotations
+
+import re
+import threading
+from pathlib import Path
+
+from app.api import Api
+
+_VALID = re.compile(r"^[a-z0-9_-]{1,32}$")
+
+
+class Registry:
+    """One cached Api per user, each bound to users/<name>/ledger.db."""
+
+    def __init__(self, base_dir):
+        self.base = Path(base_dir)
+        self._apis: dict[str, Api] = {}
+        self._lock = threading.Lock()
+
+    def user_dir(self, username: str) -> Path:
+        if not _VALID.match(username or ""):
+            raise ValueError(f"invalid username: {username!r}")
+        return self.base / username
+
+    def get_api(self, username: str) -> Api:
+        ud = self.user_dir(username)          # validates before any caching
+        with self._lock:
+            api = self._apis.get(username)
+            if api is None:
+                api = Api(ud / "ledger.db", backup_dir=ud / "backups")
+                self._apis[username] = api
+            return api

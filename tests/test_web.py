@@ -26,3 +26,28 @@ def test_user_store_add_verify_list_remove(tmp_path):
     assert store.list() == ["alice"]
     store.remove("alice")
     assert not store.exists("alice")
+
+
+import pytest
+from web.registry import Registry
+
+
+def test_registry_creates_isolated_ledgers(tmp_path):
+    reg = Registry(tmp_path)
+    a = reg.get_api("alice")
+    b = reg.get_api("bob")
+    assert a is not b
+    assert (tmp_path / "alice" / "ledger.db").exists()
+    assert (tmp_path / "bob" / "ledger.db").exists()
+
+
+def test_registry_caches_same_instance(tmp_path):
+    reg = Registry(tmp_path)
+    assert reg.get_api("alice") is reg.get_api("alice")
+
+
+def test_registry_rejects_unsafe_username(tmp_path):
+    reg = Registry(tmp_path)
+    for bad in ["../escape", "a/b", "", "x" * 33, "Bad Name"]:
+        with pytest.raises(ValueError):
+            reg.get_api(bad)
