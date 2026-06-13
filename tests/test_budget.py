@@ -77,3 +77,40 @@ def test_unbudgeted_spend_has_null_pace(seeded):
     rows = {r["name"]: r for r in budget.category_status(seeded, TODAY)}
     assert rows["Health"]["spent_agorot"] == 50000
     assert rows["Health"]["pace_ratio"] is None
+
+
+def test_safe_to_spend_reserves_deadline_goal_savings(seeded):
+    # money you must save this month to hit a deadline goal is NOT safe to spend
+    from app.engine import goals
+    base = budget.safe_to_spend(seeded, TODAY)
+    assert base["goal_reserve_agorot"] == 0           # no goals yet
+    db.add_goal(seeded, name="Drone", type="save_by_date",
+                target_agorot=300000, target_date=dt.date(2026, 9, 9))
+    pace = sum(g["pace_needed_agorot"] for g in goals.goal_report(seeded, TODAY)
+               if g["pace_needed_agorot"])
+    assert pace > 0
+    s = budget.safe_to_spend(seeded, TODAY)
+    assert s["goal_reserve_agorot"] == pace
+    assert s["remaining_agorot"] == base["remaining_agorot"] - pace
+    assert s["today_agorot"] == s["remaining_agorot"] // s["days_left"]
+
+
+def test_safe_to_spend_ignores_deadlineless_fund(seeded):
+    # an open-ended purchase fund (no target date) imposes no forced reserve
+    db.add_goal(seeded, name="Someday", type="purchase_fund",
+                target_agorot=500000, target_date=None)
+    s = budget.safe_to_spend(seeded, TODAY)
+    assert s["goal_reserve_agorot"] == 0
+
+
+def test_safe_to_spend_goal_reserve_shrinks_as_goal_is_funded(seeded):
+    # contributing toward the goal lowers remaining-to-target -> lower pace ->
+    # smaller reserve (progress-aware, no double counting)
+    gid = db.add_goal(seeded, name="Drone", type="save_by_date",
+                      target_agorot=300000, target_date=dt.date(2026, 9, 9))
+    before = budget.safe_to_spend(seeded, TODAY)["goal_reserve_agorot"]
+    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=-150000,
+                       direction="goal_contribution", goal_id=gid,
+                       description="half funded")
+    after = budget.safe_to_spend(seeded, TODAY)["goal_reserve_agorot"]
+    assert 0 <= after < before

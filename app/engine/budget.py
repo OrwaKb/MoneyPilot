@@ -41,10 +41,15 @@ def safe_to_spend(conn, today: dt.date) -> dict:
     pool = sum(budgets.get(cid, 0) for cid in disc)
     spent = _expense_sum(conn, start=cyc["start"], end=cyc["end"],
                          category_ids=disc)
-    remaining = pool - spent
+    # Hold back what you owe your deadline goals this cycle — money committed to
+    # a goal isn't "safe to spend". Late import: goals imports budget.
+    from app.engine import goals
+    goal_reserve = goals.cycle_savings_reserve(conn, today)
+    remaining = pool - spent - goal_reserve
     return {
         "pool_agorot": pool,
         "spent_agorot": spent,
+        "goal_reserve_agorot": goal_reserve,
         "remaining_agorot": remaining,
         "days_left": cyc["days_left"],
         "today_agorot": remaining // cyc["days_left"] if remaining > 0 else 0,

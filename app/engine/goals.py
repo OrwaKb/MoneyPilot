@@ -35,6 +35,15 @@ def monthly_savings_pace(conn, today: dt.date, n_cycles: int = 3) -> int:
     return income - expenses
 
 
+def cycle_savings_reserve(conn, today: dt.date) -> int:
+    """Goal savings to hold out of safe-to-spend this cycle: the monthly pace
+    needed to keep each *deadline* goal on time. Open-ended funds (no target
+    date) impose no forced reserve. Progress-aware — pace_needed is derived from
+    remaining-to-target, so it shrinks as you save and is 0 once a goal is met."""
+    return sum(g["pace_needed_agorot"] for g in goal_report(conn, today)
+               if g["pace_needed_agorot"])
+
+
 def _projection(conn, goal_id: int, remaining: int, today: dt.date):
     """Projected completion from the last 90 days of contributions."""
     since = today - dt.timedelta(days=90)
