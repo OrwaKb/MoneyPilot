@@ -149,3 +149,21 @@ def test_cli_remove(tmp_path, monkeypatch):
     users_cli.main(["add", "bob", "--users", str(upath)])
     assert users_cli.main(["remove", "bob", "--users", str(upath)]) == 0
     assert not auth.UserStore(upath).exists("bob")
+
+
+def test_export_csv_downloads(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        _login(c, "alice", "pw1")
+        r = c.get("/api/export_csv?month=2026-06")
+        assert r.status_code == 200
+        assert "attachment" in r.headers["content-disposition"]
+        # CSV is written utf-8-sig (Excel-friendly BOM); strip it before checking.
+        assert r.text.lstrip("﻿").splitlines()[0].startswith("date,amount_ils")
+        # the file was written under alice's dir, not the shared repo exports/
+        assert (tmp_path / "alice" / "exports" / "moneypilot-2026-06.csv").exists()
+
+
+def test_export_csv_requires_auth(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        r = c.get("/api/export_csv?month=2026-06", follow_redirects=False)
+        assert r.status_code == 303

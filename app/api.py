@@ -308,13 +308,14 @@ class Api:
     # --- export ----------------------------------------------------------------------
 
     @_safe
-    def export_csv(self, month: str):
+    def export_csv(self, month: str, out_dir=None):
         y, m = map(int, month.split("-"))
         start = dt.date(y, m, 1)
         end = (dt.date(y + 1, 1, 1) if m == 12
                else dt.date(y, m + 1, 1)) - dt.timedelta(days=1)
         rows = db.list_transactions(self.conn, start=start, end=end)
-        out_dir = Path(__file__).resolve().parent.parent / "exports"
+        out_dir = (Path(out_dir) if out_dir is not None
+                   else Path(__file__).resolve().parent.parent / "exports")
         out_dir.mkdir(exist_ok=True)
         path = out_dir / f"moneypilot-{month}.csv"
         with open(path, "w", newline="", encoding="utf-8-sig") as f:

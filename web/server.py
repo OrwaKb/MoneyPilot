@@ -78,6 +78,19 @@ def create_app(*, base_dir, users_path, secret_key) -> FastAPI:
         result = await run_in_threadpool(getattr(api, method), *args)
         return JSONResponse(result)
 
+    @app.get("/api/export_csv")
+    async def export_csv(request: Request, month: str):
+        user = request.session.get("user")
+        if not user:
+            return RedirectResponse("/login", status_code=303)
+        api = registry.get_api(user)
+        out_dir = registry.user_dir(user) / "exports"
+        res = await run_in_threadpool(api.export_csv, month, str(out_dir))
+        if not res.get("ok"):
+            return JSONResponse(res, status_code=400)
+        return FileResponse(res["path"], media_type="text/csv",
+                            filename=f"moneypilot-{month}.csv")
+
     # Static assets (app.css, app.js, assets/*). Added LAST so the explicit
     # routes above win; html=False so it never auto-serves index.html for "/".
     app.mount("/", StaticFiles(directory=str(UI_DIR), html=False), name="ui")
