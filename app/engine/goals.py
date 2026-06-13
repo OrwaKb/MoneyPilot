@@ -37,11 +37,17 @@ def monthly_savings_pace(conn, today: dt.date, n_cycles: int = 3) -> int:
 
 def cycle_savings_reserve(conn, today: dt.date) -> int:
     """Goal savings to hold out of safe-to-spend this cycle: the monthly pace
-    needed to keep each *deadline* goal on time. Open-ended funds (no target
-    date) impose no forced reserve. Progress-aware — pace_needed is derived from
-    remaining-to-target, so it shrinks as you save and is 0 once a goal is met."""
-    return sum(g["pace_needed_agorot"] for g in goal_report(conn, today)
-               if g["pace_needed_agorot"])
+    needed to keep each *deadline* goal on time, capped at what's still left to
+    save (a sub-month deadline makes the monthly pace explode, but you never
+    need to set aside more than the goal's remaining). Open-ended funds (no
+    target date) reserve nothing. Progress-aware — shrinks as you save, 0 once
+    a goal is met."""
+    total = 0
+    for g in goal_report(conn, today):
+        pace = g["pace_needed_agorot"]
+        if pace:
+            total += min(pace, g["remaining_agorot"])
+    return total
 
 
 def _projection(conn, goal_id: int, remaining: int, today: dt.date):

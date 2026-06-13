@@ -34,21 +34,39 @@ def _discretionary_ids(conn) -> list[int]:
             if not c["is_income"] and not c["is_fixed"]]
 
 
+def available_balance(conn) -> int:
+    """Actual money on hand: opening balance + every signed transaction since
+    the opening date. Goal contributions count only for ACTIVE goals (archiving
+    a goal releases its set-aside money back to available)."""
+    opening = int(db.get_setting(conn, "opening_balance_agorot", "0"))
+    opening_date = db.get_setting(conn, "opening_balance_date")
+    q = ("SELECT COALESCE(SUM(amount_agorot),0) AS s FROM transactions t"
+         " WHERE t.deleted_at IS NULL"
+         " AND (t.direction != 'goal_contribution'"
+         " OR t.goal_id IN (SELECT id FROM goals WHERE status='active'))")
+    args: list = []
+    if opening_date:
+        q += " AND t.effective_date >= ?"
+        args.append(opening_date)
+    return opening + conn.execute(q, args).fetchone()["s"]
+
+
 def safe_to_spend(conn, today: dt.date) -> dict:
+    """How much is safe to spend per day until the next salary.
+
+    It's your ACTUAL money minus what you still need to set aside for deadline
+    goals, spread over the days left in the cycle. Category budgets are NOT the
+    pool — they're per-category trackers (see ``category_status``); you can
+    overspend a category, it just shows there. Goals DO reduce it: a goal you're
+    saving toward lowers what's spendable today."""
     cyc = _cycle(conn, today)
-    budgets = db.get_budgets(conn)
-    disc = _discretionary_ids(conn)
-    pool = sum(budgets.get(cid, 0) for cid in disc)
-    spent = _expense_sum(conn, start=cyc["start"], end=cyc["end"],
-                         category_ids=disc)
-    # Hold back what you owe your deadline goals this cycle — money committed to
-    # a goal isn't "safe to spend". Late import: goals imports budget.
-    from app.engine import goals
+    available = available_balance(conn)
+    # Money you still owe your deadline goals isn't safe to spend.
+    from app.engine import goals          # late import: goals imports budget
     goal_reserve = goals.cycle_savings_reserve(conn, today)
-    remaining = pool - spent - goal_reserve
+    remaining = available - goal_reserve
     return {
-        "pool_agorot": pool,
-        "spent_agorot": spent,
+        "available_agorot": available,
         "goal_reserve_agorot": goal_reserve,
         "remaining_agorot": remaining,
         "days_left": cyc["days_left"],

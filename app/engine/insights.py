@@ -19,18 +19,7 @@ def fact_pack(conn, today: dt.date) -> dict:
     card = budget.card_accrual(conn, today)
     income, expenses = budget.cycle_net(conn, cyc["start"], cyc["end"])
 
-    opening = int(db.get_setting(conn, "opening_balance_agorot", "0"))
-    opening_date = db.get_setting(conn, "opening_balance_date")
-    q = ("SELECT COALESCE(SUM(amount_agorot),0) AS s FROM transactions t"
-         " WHERE t.deleted_at IS NULL"
-         " AND (t.direction != 'goal_contribution'"
-         " OR t.goal_id IN (SELECT id FROM goals WHERE status='active'))")
-    args: list = []
-    if opening_date:
-        q += " AND t.effective_date >= ?"
-        args.append(opening_date)
-    signed_sum = conn.execute(q, args).fetchone()["s"]
-    available = opening + signed_sum
+    available = budget.available_balance(conn)
     report = goals.goal_report(conn, today)
     earmarked = sum(g["progress_agorot"] for g in report)
     total_pace_needed = sum(g["pace_needed_agorot"] for g in report
@@ -49,7 +38,8 @@ def fact_pack(conn, today: dt.date) -> dict:
             "today_fmt": fmt_ils(sts["today_agorot"]),
             "remaining_agorot": sts["remaining_agorot"],
             "remaining_fmt": fmt_ils(sts["remaining_agorot"]),
-            "pool_agorot": sts["pool_agorot"],
+            "available_agorot": sts["available_agorot"],
+            "available_fmt": fmt_ils(sts["available_agorot"]),
             "goal_reserve_agorot": sts["goal_reserve_agorot"],
             "goal_reserve_fmt": fmt_ils(sts["goal_reserve_agorot"]),
             "days_left": sts["days_left"],

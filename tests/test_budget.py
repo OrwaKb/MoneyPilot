@@ -13,24 +13,32 @@ def _spend(conn, cat, agorot, day=TODAY, method="card"):
                        payment_method=method, description="t")
 
 
-def test_safe_to_spend_basic(seeded):
-    # discretionary pool = 60000+120000+40000+40000 = 260000 (Bills excluded)
-    _spend(seeded, "Food out", 4500)
+def test_safe_to_spend_is_money_over_days_not_budgets(seeded):
+    # safe-to-spend = your ACTUAL money / days to payday. Category budgets do
+    # NOT define it (seeded: opening ₪5,000, no other txns; budgets present).
     s = budget.safe_to_spend(seeded, TODAY)
-    assert s["pool_agorot"] == 260000
-    assert s["spent_agorot"] == 4500
+    assert s["available_agorot"] == 500000
+    assert s["goal_reserve_agorot"] == 0
+    assert s["remaining_agorot"] == 500000
     assert s["days_left"] == 29
-    assert s["today_agorot"] == (260000 - 4500) // 29
+    assert s["today_agorot"] == 500000 // 29
 
-def test_safe_to_spend_excludes_bills_and_cash_counts(seeded):
-    _spend(seeded, "Bills", 100000)          # fixed → not discretionary
-    _spend(seeded, "Food out", 1000, method="cash")  # cash still counts
-    s = budget.safe_to_spend(seeded, TODAY)
-    assert s["spent_agorot"] == 1000
+def test_category_budget_size_does_not_change_safe_to_spend(seeded):
+    # a huge Fun budget does NOT raise safe-to-spend — budgets aren't the pool
+    base = budget.safe_to_spend(seeded, TODAY)["today_agorot"]
+    db.set_budget(seeded, db.category_id_by_name(seeded, "Fun"), 9_000_000)
+    assert budget.safe_to_spend(seeded, TODAY)["today_agorot"] == base
 
-def test_safe_to_spend_ignores_out_of_cycle(seeded):
-    _spend(seeded, "Food out", 9999, day=dt.date(2026, 6, 9))  # previous cycle
-    assert budget.safe_to_spend(seeded, TODAY)["spent_agorot"] == 0
+def test_spending_reduces_available_money_any_category(seeded):
+    # money is money: a fixed Bills expense reduces available like any other
+    _spend(seeded, "Bills", 100000)
+    assert budget.safe_to_spend(seeded, TODAY)["available_agorot"] == 400000
+
+def test_income_raises_available_money(seeded):
+    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=900000,
+                       direction="income",
+                       category_id=db.category_id_by_name(seeded, "Salary"))
+    assert budget.safe_to_spend(seeded, TODAY)["available_agorot"] == 1_400_000
 
 def test_category_status_pace(seeded):
     _spend(seeded, "Food out", 30000)  # half the 60000 budget on day 2 of 30
@@ -56,16 +64,16 @@ def test_cycle_net(seeded):
                                         dt.date(2026, 7, 9))
     assert income == 900000 and expenses == 4500
 
-def test_safe_to_spend_overspent_clamps_to_zero(seeded):
-    _spend(seeded, "Food out", 999999)  # blow the whole pool
+def test_safe_to_spend_clamps_to_zero_when_broke(seeded):
+    _spend(seeded, "Fun", 500000)  # spend the whole balance to zero
     s = budget.safe_to_spend(seeded, TODAY)
-    assert s["remaining_agorot"] < 0 and s["today_agorot"] == 0
+    assert s["available_agorot"] == 0 and s["today_agorot"] == 0
 
-def test_soft_deleted_excluded_from_spend(seeded):
+def test_soft_deleted_expense_not_counted(seeded):
     _spend(seeded, "Food out", 4500)
     tid = db.list_transactions(seeded)[0]["id"]
     db.soft_delete_transaction(seeded, tid)
-    assert budget.safe_to_spend(seeded, TODAY)["spent_agorot"] == 0
+    assert budget.safe_to_spend(seeded, TODAY)["available_agorot"] == 500000
 
 def test_card_purchase_on_charge_date_rolls_to_next_statement(seeded):
     _spend(seeded, "Food out", 5000, day=dt.date(2026, 7, 2))  # ON charge day
@@ -79,37 +87,40 @@ def test_unbudgeted_spend_has_null_pace(seeded):
     assert rows["Health"]["pace_ratio"] is None
 
 
-def test_safe_to_spend_reserves_deadline_goal_savings(seeded):
-    # money you must save this month to hit a deadline goal is NOT safe to spend
-    from app.engine import goals
+def test_safe_to_spend_subtracts_goal_savings(seeded):
+    # a deadline goal reserves savings out of your spendable money
     base = budget.safe_to_spend(seeded, TODAY)
     assert base["goal_reserve_agorot"] == 0           # no goals yet
     db.add_goal(seeded, name="Drone", type="save_by_date",
-                target_agorot=300000, target_date=dt.date(2026, 9, 9))
-    pace = sum(g["pace_needed_agorot"] for g in goals.goal_report(seeded, TODAY)
-               if g["pace_needed_agorot"])
-    assert pace > 0
+                target_agorot=100000, target_date=dt.date(2026, 9, 9))
     s = budget.safe_to_spend(seeded, TODAY)
-    assert s["goal_reserve_agorot"] == pace
-    assert s["remaining_agorot"] == base["remaining_agorot"] - pace
+    assert 0 < s["goal_reserve_agorot"] <= 100000
+    assert s["remaining_agorot"] == base["remaining_agorot"] - s["goal_reserve_agorot"]
     assert s["today_agorot"] == s["remaining_agorot"] // s["days_left"]
 
 
-def test_safe_to_spend_ignores_deadlineless_fund(seeded):
+def test_goal_reserve_capped_at_amount_remaining(seeded):
+    # a near-deadline goal must NOT reserve more than what's left to save
+    # (the monthly pace explodes for a sub-month deadline; cap it at remaining)
+    db.add_goal(seeded, name="Rent", type="save_by_date",
+                target_agorot=300000, target_date=dt.date(2026, 6, 20))  # ~9 days
+    from app.engine import goals
+    assert goals.cycle_savings_reserve(seeded, TODAY) == 300000  # not 10x pace
+
+
+def test_deadlineless_fund_reserves_nothing(seeded):
     # an open-ended purchase fund (no target date) imposes no forced reserve
     db.add_goal(seeded, name="Someday", type="purchase_fund",
                 target_agorot=500000, target_date=None)
-    s = budget.safe_to_spend(seeded, TODAY)
-    assert s["goal_reserve_agorot"] == 0
+    assert budget.safe_to_spend(seeded, TODAY)["goal_reserve_agorot"] == 0
 
 
-def test_safe_to_spend_goal_reserve_shrinks_as_goal_is_funded(seeded):
-    # contributing toward the goal lowers remaining-to-target -> lower pace ->
-    # smaller reserve (progress-aware, no double counting)
+def test_goal_reserve_shrinks_as_goal_is_funded(seeded):
+    # contributing lowers remaining-to-target -> lower pace -> smaller reserve
     gid = db.add_goal(seeded, name="Drone", type="save_by_date",
-                      target_agorot=300000, target_date=dt.date(2026, 9, 9))
+                      target_agorot=100000, target_date=dt.date(2026, 9, 9))
     before = budget.safe_to_spend(seeded, TODAY)["goal_reserve_agorot"]
-    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=-150000,
+    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=-50000,
                        direction="goal_contribution", goal_id=gid,
                        description="half funded")
     after = budget.safe_to_spend(seeded, TODAY)["goal_reserve_agorot"]
