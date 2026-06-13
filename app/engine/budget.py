@@ -54,19 +54,27 @@ def available_balance(conn) -> int:
 def safe_to_spend(conn, today: dt.date) -> dict:
     """How much is safe to spend per day until the next salary.
 
-    It's your ACTUAL money minus what you still need to set aside for deadline
-    goals, spread over the days left in the cycle. Category budgets are NOT the
-    pool — they're per-category trackers (see ``category_status``); you can
-    overspend a category, it just shows there. Goals DO reduce it: a goal you're
-    saving toward lowers what's spendable today."""
+    (balance + salary you'll still receive this cycle − goal savings) ÷ days to
+    the next salary. It anticipates the salary you haven't logged yet, so it's
+    not ~0 just because this cycle's pay isn't recorded; and it's stable once
+    you do log it (the salary already in your balance isn't counted twice).
+    Category budgets are NOT the pool — they're per-category trackers (see
+    ``category_status``); you can overspend a category, it just shows there.
+    Goals DO reduce it: money you're saving toward a deadline goal lowers what's
+    spendable today."""
     cyc = _cycle(conn, today)
     available = available_balance(conn)
-    # Money you still owe your deadline goals isn't safe to spend.
+    # Anticipate the salary not yet received this cycle (so safe-to-spend
+    # reflects the money that's coming, and doesn't double-count once logged).
+    salary = int(db.get_setting(conn, "salary_amount_agorot", "0"))
+    income_so_far, _ = cycle_net(conn, cyc["start"], today)
+    expected_salary = max(0, salary - income_so_far)
     from app.engine import goals          # late import: goals imports budget
     goal_reserve = goals.cycle_savings_reserve(conn, today)
-    remaining = available - goal_reserve
+    remaining = available + expected_salary - goal_reserve
     return {
         "available_agorot": available,
+        "expected_salary_agorot": expected_salary,
         "goal_reserve_agorot": goal_reserve,
         "remaining_agorot": remaining,
         "days_left": cyc["days_left"],

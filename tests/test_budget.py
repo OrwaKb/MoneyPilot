@@ -13,15 +13,40 @@ def _spend(conn, cat, agorot, day=TODAY, method="card"):
                        payment_method=method, description="t")
 
 
-def test_safe_to_spend_is_money_over_days_not_budgets(seeded):
-    # safe-to-spend = your ACTUAL money / days to payday. Category budgets do
-    # NOT define it (seeded: opening ₪5,000, no other txns; budgets present).
+def test_safe_to_spend_projects_unreceived_salary(seeded):
+    # safe-to-spend = (balance + salary you'll still get this cycle) / days to
+    # payday. Category budgets do NOT define it. seeded: opening ₪5,000, salary
+    # ₪9,000 (setting), nothing logged yet -> the ₪9,000 is anticipated.
     s = budget.safe_to_spend(seeded, TODAY)
-    assert s["available_agorot"] == 500000
+    assert s["available_agorot"] == 500000           # actual money now
+    assert s["expected_salary_agorot"] == 900000     # not received yet
     assert s["goal_reserve_agorot"] == 0
-    assert s["remaining_agorot"] == 500000
+    assert s["remaining_agorot"] == 500000 + 900000
     assert s["days_left"] == 29
-    assert s["today_agorot"] == 500000 // 29
+    assert s["today_agorot"] == (500000 + 900000) // 29
+
+def test_safe_to_spend_matches_user_worked_example(tmp_path):
+    # balance −₪2,500, salary ₪5,000, ~27 days left -> ~₪92/day
+    c = db.connect(tmp_path / "x.db"); db.init_db(c)
+    db.set_setting(c, "salary_day", "10")
+    db.set_setting(c, "salary_amount_agorot", "500000")     # ₪5,000
+    db.set_setting(c, "opening_balance_agorot", "-250000")  # ₪−2,500
+    db.set_setting(c, "opening_balance_date", "2026-06-01")
+    s = budget.safe_to_spend(c, dt.date(2026, 6, 13))       # cycle Jun10..Jul9
+    assert s["days_left"] == 27
+    assert s["remaining_agorot"] == 250000                  # −2500 + 5000
+    assert s["today_agorot"] == 250000 // 27                # ≈ ₪92.59
+
+def test_safe_to_spend_stable_once_salary_logged(seeded):
+    # logging the salary must NOT double-count: remaining is unchanged
+    before = budget.safe_to_spend(seeded, TODAY)["remaining_agorot"]
+    db.add_transaction(seeded, effective_date=TODAY, amount_agorot=900000,
+                       direction="income",
+                       category_id=db.category_id_by_name(seeded, "Salary"))
+    after = budget.safe_to_spend(seeded, TODAY)
+    assert after["expected_salary_agorot"] == 0      # now received
+    assert after["available_agorot"] == 500000 + 900000
+    assert after["remaining_agorot"] == before       # same spendable
 
 def test_category_budget_size_does_not_change_safe_to_spend(seeded):
     # a huge Fun budget does NOT raise safe-to-spend — budgets aren't the pool
@@ -64,10 +89,11 @@ def test_cycle_net(seeded):
                                         dt.date(2026, 7, 9))
     assert income == 900000 and expenses == 4500
 
-def test_safe_to_spend_clamps_to_zero_when_broke(seeded):
-    _spend(seeded, "Fun", 500000)  # spend the whole balance to zero
+def test_safe_to_spend_clamps_to_zero_when_overdrawn(seeded):
+    # spend beyond balance + the anticipated salary -> nothing safe to spend
+    _spend(seeded, "Fun", 1_500_000)   # opening 500000 + salary 900000 = 1.4M
     s = budget.safe_to_spend(seeded, TODAY)
-    assert s["available_agorot"] == 0 and s["today_agorot"] == 0
+    assert s["remaining_agorot"] < 0 and s["today_agorot"] == 0
 
 def test_soft_deleted_expense_not_counted(seeded):
     _spend(seeded, "Food out", 4500)
