@@ -51,3 +51,80 @@ def test_registry_rejects_unsafe_username(tmp_path):
     for bad in ["../escape", "a/b", "", "x" * 33, "Bad Name"]:
         with pytest.raises(ValueError):
             reg.get_api(bad)
+
+
+from fastapi.testclient import TestClient as _FastApiTestClient
+from app.ai import client as ai_client
+
+
+class TestClient(_FastApiTestClient):
+    """TestClient that talks to the app over https://testserver so the
+    session cookie (set Secure by https_only=True, matching the real
+    Cloudflare HTTPS tunnel) is sent back on follow-up requests."""
+
+    def __init__(self, app, *args, **kwargs):
+        kwargs.setdefault("base_url", "https://testserver")
+        super().__init__(app, *args, **kwargs)
+
+
+def _make_app(tmp_path):
+    from web.server import create_app
+    store = auth.UserStore(tmp_path / "users.json")
+    store.add("alice", "pw1")
+    store.add("bob", "pw2")
+    return create_app(base_dir=tmp_path, users_path=tmp_path / "users.json",
+                      secret_key="test-secret")
+
+
+def _login(c, user, pw):
+    return c.post("/login", data={"username": user, "password": pw},
+                  follow_redirects=False)
+
+
+def test_dispatch_requires_auth(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        r = c.post("/api/get_overview", json=[])
+        assert r.status_code == 401
+
+
+def test_login_then_overview(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        assert _login(c, "alice", "pw1").status_code == 303
+        r = c.post("/api/get_overview", json=[])
+        assert r.status_code == 200 and r.json()["ok"] is True
+
+
+def test_bad_login_rejected(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        r = _login(c, "alice", "WRONG")
+        assert r.status_code == 303 and "error" in r.headers["location"]
+        assert c.post("/api/get_overview", json=[]).status_code == 401
+
+
+def test_non_allowlisted_method_forbidden(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        _login(c, "alice", "pw1")
+        # a real Api attribute that is NOT in the allowlist
+        assert c.post("/api/export_csv", json=["2026-06"]).status_code != 200
+        assert c.post("/api/__init__", json=[]).status_code == 403
+
+
+def test_root_redirects_when_logged_out(tmp_path):
+    with TestClient(_make_app(tmp_path)) as c:
+        r = c.get("/", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].endswith("/login")
+
+
+def test_two_users_isolated(tmp_path, monkeypatch):
+    # force the offline regex parser so add_entry is deterministic + network-free
+    monkeypatch.setattr(ai_client, "ask_claude",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            ai_client.AIUnavailable("offline")))
+    app = _make_app(tmp_path)
+    with TestClient(app) as ca, TestClient(app) as cb:
+        _login(ca, "alice", "pw1")
+        _login(cb, "bob", "pw2")
+        ca.post("/api/add_entry", json=["45 coffee"])
+        a_recent = ca.post("/api/get_overview", json=[]).json()["recent"]
+        b_recent = cb.post("/api/get_overview", json=[]).json()["recent"]
+        assert len(a_recent) == 1 and len(b_recent) == 0
