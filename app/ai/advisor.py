@@ -9,7 +9,7 @@ from pydantic import ValidationError
 from app import db
 from app.ai import client, prompts
 from app.engine import insights
-from app.models import ParsedTxn, fmt_ils, to_agorot
+from app.models import ParsedTxn, fmt_ils, parse_iso_date, to_agorot
 
 log = logging.getLogger("moneypilot.advisor")
 
@@ -99,44 +99,112 @@ def chat(conn, text: str, today: dt.date, conversation_id=None) -> dict:
             "conversation_id": conversation_id, "title": title}
 
 
+# The chat model is told the add_transaction.txn schema, but — unlike the parser,
+# which gets the full schema AND a repair loop — it occasionally omits
+# effective_date (a live "log this" means today) or, primed by the sibling
+# create_goal/update_budget actions, names the amount `amount_ils`. Those stray
+# replies used to dump a raw pydantic "N validation errors" string straight into
+# the chat. Fill the gaps, then turn any leftover schema error into a clean line.
+_AMOUNT_ALIASES = ("amount_ils", "amount_nis", "amount_shekels")
+_DATE_ALIASES = ("date", "txn_date", "when")
+
+
+def _friendly_txn_error(e: ValidationError) -> str:
+    fields = {str(err["loc"][0]) for err in e.errors() if err.get("loc")}
+    if "amount" in fields:
+        return ('I couldn\'t log that — I didn\'t catch a valid amount. Tell me'
+                ' how much, e.g. "log ₪13 for water".')
+    if fields:
+        return ("I couldn't log that — " + ", ".join(sorted(fields))
+                + " didn't look right. Mind rephrasing the transaction?")
+    return "I couldn't log that transaction — the details weren't valid."
+
+
+def _coerce_chat_txn(txn, today: dt.date) -> ParsedTxn:
+    if not isinstance(txn, dict):
+        raise ValueError('I couldn\'t log that — the transaction details were'
+                         ' missing. Tell me the amount, e.g. "log ₪13 for water".')
+    data = dict(txn)
+    # Aliasing mirrors the amount fix: a date the model put under a stray key
+    # ("date"/"when") must land on the named day, not be silently overwritten
+    # with today. Only when NO date-like key is present do we default to today
+    # (a live "log this" means now). A present-but-junk date stays loud (errors).
+    if not data.get("effective_date"):
+        for alias in _DATE_ALIASES:
+            if data.get(alias):
+                data["effective_date"] = data.pop(alias)
+                break
+        else:
+            data["effective_date"] = today.isoformat()
+    if data.get("amount") in (None, ""):
+        for alias in _AMOUNT_ALIASES:
+            if data.get(alias) not in (None, ""):
+                data["amount"] = data.pop(alias)
+                break
+    try:
+        return ParsedTxn(**data)
+    except ValidationError as e:
+        raise ValueError(_friendly_txn_error(e)) from e
+
+
 def apply_action(conn, action: dict, today: dt.date) -> dict:
     """Apply a user-confirmed advisor action. Raises ValueError on bad input."""
     kind = action.get("type")
     if kind == "create_goal":
-        name = str(action["name"]).strip()
-        target = to_agorot(action["target_ils"])
+        # The action is AI-shaped: read every field defensively so an omitted or
+        # malformed key degrades to a clean, user-facing line — not a raw
+        # KeyError / "not a money amount: None" / "Invalid isoformat string".
+        name = str(action.get("name") or "").strip()
         if not name:
-            raise ValueError("goal name must not be empty")
+            raise ValueError("I need a name for that goal.")
+        try:
+            target = to_agorot(action.get("target_ils"))
+        except ValueError:
+            raise ValueError("I couldn't read the goal's target — tell me how"
+                             " much to save, e.g. ₪2000.")
         if target <= 0:
             raise ValueError("goal target must be positive")
+        target_date = (parse_iso_date(action["target_date"],
+                                      label="the goal's target date")
+                       if action.get("target_date") else None)
         gid = db.add_goal(conn, name=name,
                           type=("save_by_date"
                                 if action.get("goal_type") == "save_by_date"
                                 else "purchase_fund"),
-                          target_agorot=target,
-                          target_date=(dt.date.fromisoformat(action["target_date"])
-                                       if action.get("target_date") else None))
-        return {"summary": f"Goal '{action['name']}' created", "goal_id": gid}
+                          target_agorot=target, target_date=target_date)
+        return {"summary": f"Goal '{name}' created", "goal_id": gid}
     if kind == "update_budget":
-        cat_id = db.category_id_by_name(conn, str(action["category"]))
+        cat_name = str(action.get("category") or "").strip()
+        if not cat_name:
+            raise ValueError("Which category should I set the budget for?")
+        cat_id = db.category_id_by_name(conn, cat_name)
         if cat_id is None:
-            raise ValueError(f"unknown category {action['category']!r}")
-        amount = to_agorot(action["amount_ils"])
+            raise ValueError(f"unknown category {cat_name!r}")
+        try:
+            amount = to_agorot(action.get("amount_ils"))
+        except ValueError:
+            raise ValueError("I couldn't read that budget — give me a number of"
+                             " shekels.")
         if amount <= 0:
             raise ValueError("budget must be positive")
         db.set_budget(conn, cat_id, amount)
-        return {"summary": f"Budget for {action['category']} set to "
-                           f"{fmt_ils(amount)}"}
+        return {"summary": f"Budget for {cat_name} set to {fmt_ils(amount)}"}
     if kind == "add_transaction":
         from app.ai import parser  # late import avoids a cycle
-        p = ParsedTxn(**action["txn"])
+        p = _coerce_chat_txn(action.get("txn"), today)
         tid = parser._store(conn, p, raw_text="(advisor action)", source="ai")
-        return {"summary": "Transaction added", "txn_id": tid}
+        # Echo the amount + date so a scale/date slip is visible in the toast.
+        shown = (fmt_ils(to_agorot(p.amount)) if p.currency == "ILS"
+                 else f"{p.amount:g} {p.currency}")
+        return {"summary": f"Logged {shown} on {p.effective_date.isoformat()}",
+                "txn_id": tid}
     if kind == "adjust_setting":
-        key = str(action["key"])
+        key = str(action.get("key") or "").strip()
+        if not key:
+            raise ValueError("I couldn't tell which setting to change.")
         if key not in _SETTING_WHITELIST:
             raise ValueError(f"setting {key!r} is not adjustable via chat")
-        value = str(action["value"]).strip()
+        value = str(action.get("value") or "").strip()
         if key in ("salary_day", "card_charge_day"):
             if not value.isdigit() or not 1 <= int(value) <= 31:
                 raise ValueError(f"{key} must be an integer 1..31")

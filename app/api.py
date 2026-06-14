@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import functools
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -10,7 +11,7 @@ from pathlib import Path
 from app import db
 from app.ai import advisor, parser
 from app.engine import budget, goals as goals_eng, insights
-from app.models import fmt_ils, to_agorot, to_whole_agorot
+from app.models import fmt_ils, parse_iso_date, to_agorot, to_whole_agorot
 
 ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
                 "card_charge_day")
@@ -184,26 +185,27 @@ class Api:
     @_safe
     def save_goal(self, g: dict):
         with self._lock:
-            name = str(g["name"]).strip()
-            target = to_agorot(g["target_ils"])
+            name = str(g.get("name") or "").strip()
             if not name:
                 raise ValueError("goal name must not be empty")
+            try:
+                target = to_agorot(g.get("target_ils"))
+            except ValueError:
+                raise ValueError("enter the goal's target as a number of shekels")
             if target <= 0:
                 raise ValueError("goal target must be positive")
+            target_date = (parse_iso_date(g["target_date"],
+                                          label="the goal's target date")
+                           if g.get("target_date") else None)
             if g.get("id"):
-                db.update_goal(self.conn, int(g["id"]),
-                               name=name,
-                               target_agorot=target,
-                               target_date=(dt.date.fromisoformat(g["target_date"])
-                                            if g.get("target_date") else None))
+                db.update_goal(self.conn, int(g["id"]), name=name,
+                               target_agorot=target, target_date=target_date)
             else:
                 db.add_goal(self.conn, name=name,
                             emoji=g.get("emoji", "🎯"),
                             type=("save_by_date" if g.get("goal_type") ==
                                   "save_by_date" else "purchase_fund"),
-                            target_agorot=target,
-                            target_date=(dt.date.fromisoformat(g["target_date"])
-                                         if g.get("target_date") else None))
+                            target_agorot=target, target_date=target_date)
         return {}
 
     @_safe
@@ -291,7 +293,10 @@ class Api:
     @_safe
     def set_category_budget(self, category_id: int, amount_ils):
         with self._lock:
-            amount = to_agorot(amount_ils)
+            try:
+                amount = to_agorot(amount_ils)
+            except ValueError:
+                raise ValueError("enter the budget as a number of shekels")
             if amount <= 0:
                 raise ValueError("budget must be positive")
             db.set_budget(self.conn, int(category_id), amount)
@@ -356,7 +361,11 @@ class Api:
 
     @_safe
     def export_csv(self, month: str, out_dir=None):
-        y, m = map(int, month.split("-"))
+        if not re.fullmatch(r"\d{4}-\d{2}", str(month or "")):
+            raise ValueError("month must look like YYYY-MM")
+        y, m = int(month[:4]), int(month[5:7])
+        if not 1 <= m <= 12:
+            raise ValueError("month must look like YYYY-MM")
         start = dt.date(y, m, 1)
         end = (dt.date(y + 1, 1, 1) if m == 12
                else dt.date(y, m + 1, 1)) - dt.timedelta(days=1)

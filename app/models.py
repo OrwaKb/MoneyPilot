@@ -45,6 +45,17 @@ def to_whole_agorot(amount, *, allow_zero: bool = False,
     return n * 100
 
 
+def parse_iso_date(value, *, label: str = "date") -> dt.date:
+    """ISO date parse that raises a human ValueError instead of the stdlib's
+    'Invalid isoformat string' (or a TypeError on non-strings) — so an AI- or
+    user-supplied date like "October 1st" degrades to a clean, user-facing
+    message rather than leaking a Python implementation detail."""
+    try:
+        return dt.date.fromisoformat(str(value).strip())
+    except (ValueError, TypeError):
+        raise ValueError(f"{label} must be a date like 2026-10-01")
+
+
 def fmt_ils(agorot: int) -> str:
     sign = "-" if agorot < 0 else ""
     shekels, ag = divmod(abs(agorot), 100)

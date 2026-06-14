@@ -294,6 +294,31 @@ def test_save_goal_update_rejects_junk_date(api):
     assert res["ok"] is False
     assert api.get_goals()["ok"] is True  # view still renders
 
+
+def test_save_goal_missing_target_is_user_facing(api):
+    # A form post without target_ils used to raise a raw KeyError tagged
+    # "internal" (a dead-end generic error on web); it must be clean + "user".
+    res = api.save_goal({"name": "Trip", "goal_type": "purchase_fund"})
+    assert res["ok"] is False and res["error_kind"] == "user"
+    assert "target_ils" not in res["error"] and "not a money amount" not in res["error"]
+
+def test_save_goal_bad_date_no_raw_leak(api):
+    res = api.save_goal({"name": "Trip", "goal_type": "save_by_date",
+                         "target_ils": 2000, "target_date": "next friday"})
+    assert res["ok"] is False
+    assert "isoformat" not in res["error"]
+
+def test_set_category_budget_non_numeric_no_raw_leak(api):
+    food = db.category_id_by_name(api.conn, "Food out")
+    res = api.set_category_budget(food, "lots")
+    assert res["ok"] is False
+    assert "not a money amount" not in res["error"]
+
+def test_export_csv_rejects_malformed_month(api):
+    res = api.export_csv("bogus")
+    assert res["ok"] is False
+    assert "invalid literal" not in res["error"]  # no raw int() ValueError
+
 def test_update_txn_wrong_sign_clean_error(api, monkeypatch):
     from app.ai import parser
     monkeypatch.setattr(parser.client, "ask_claude", lambda *a, **k: GOOD_REPLY)

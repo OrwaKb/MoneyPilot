@@ -353,3 +353,105 @@ def test_chat_strips_every_action_fence(seeded, monkeypatch):
     r = advisor.chat(seeded, "do things", TODAY)
     assert r["action"]["type"] == "update_budget"  # first action only
     assert "```" not in r["text"] and "create_goal" not in r["text"]
+
+
+def test_apply_action_add_transaction_real_world_chat_reply(seeded):
+    # Shape captured from a REAL Claude chat reply (2026-06-14 bug): primed by the
+    # sibling _ils actions, the model emitted the amount as `amount_ils` and
+    # omitted `effective_date`. ParsedTxn(**txn) then dumped a raw pydantic
+    # "2 validation errors" string straight into the chat. The confirm must now
+    # log the txn, dated today, instead of crashing.
+    res = advisor.apply_action(seeded, {"type": "add_transaction",
+        "txn": {"amount_ils": 13, "currency": "ILS", "direction": "expense",
+                "category": "Other", "description": "water"}}, TODAY)
+    assert res["txn_id"]
+    row = db.list_transactions(seeded, limit=1)[0]
+    assert row["amount_agorot"] == -1300                 # ₪13, expense → negative
+    assert row["effective_date"] == TODAY.isoformat()    # date defaulted to today
+
+
+def test_apply_action_add_transaction_defaults_missing_date(seeded):
+    # amount is fine, but the model left out the date — a live "log this" is today.
+    advisor.apply_action(seeded, {"type": "add_transaction",
+        "txn": {"amount": 50, "category": "Food out"}}, TODAY)
+    row = db.list_transactions(seeded, limit=1)[0]
+    assert row["amount_agorot"] == -5000
+    assert row["effective_date"] == TODAY.isoformat()
+
+
+def test_apply_action_add_transaction_full_schema_still_works(seeded):
+    advisor.apply_action(seeded, {"type": "add_transaction",
+        "txn": {"effective_date": "2026-06-10", "amount": 80, "currency": "ILS",
+                "direction": "expense", "category": "Groceries",
+                "description": "milk"}}, TODAY)
+    row = db.list_transactions(seeded, limit=1)[0]
+    assert row["amount_agorot"] == -8000
+    assert row["effective_date"] == "2026-06-10"
+
+
+def test_apply_action_add_transaction_clean_error_when_unsalvageable(seeded):
+    # No amount anywhere → genuinely unloggable. The user must get a clean,
+    # human message, never the raw "N validation errors for ParsedTxn ..." dump.
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        advisor.apply_action(seeded, {"type": "add_transaction",
+            "txn": {"category": "Other", "description": "mystery"}}, TODAY)
+    msg = str(ei.value)
+    assert "ParsedTxn" not in msg and "pydantic.dev" not in msg
+    assert db.list_transactions(seeded, limit=5) == []  # nothing was written
+
+
+def test_apply_action_add_transaction_honours_mis_keyed_date(seeded):
+    # The model named the date `date` instead of `effective_date` (the same
+    # wrong-key slip that caused the original amount bug). It must land on the
+    # named day, not be silently overwritten with today.
+    advisor.apply_action(seeded, {"type": "add_transaction",
+        "txn": {"amount": 20, "category": "Other", "date": "2026-06-05"}}, TODAY)
+    row = db.list_transactions(seeded, limit=1)[0]
+    assert row["effective_date"] == "2026-06-05"
+
+
+# --- sibling action branches: a malformed AI action must never dump a raw
+#     KeyError / "not a money amount" / "Invalid isoformat string" at the user.
+
+def test_apply_action_create_goal_missing_target_clean_error(seeded):
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        advisor.apply_action(seeded, {"type": "create_goal", "name": "Trip",
+                                      "goal_type": "purchase_fund"}, TODAY)
+    msg = str(ei.value)
+    assert "target_ils" not in msg and "not a money amount" not in msg
+    assert db.list_goals(seeded) == []
+
+def test_apply_action_create_goal_null_target_clean_error(seeded):
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        advisor.apply_action(seeded, {"type": "create_goal", "name": "Trip",
+                                      "goal_type": "purchase_fund",
+                                      "target_ils": None}, TODAY)
+    assert "not a money amount" not in str(ei.value)
+    assert db.list_goals(seeded) == []
+
+def test_apply_action_create_goal_bad_date_clean_error(seeded):
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        advisor.apply_action(seeded, {"type": "create_goal", "name": "Trip",
+                                      "goal_type": "save_by_date",
+                                      "target_ils": 2000,
+                                      "target_date": "October 1st"}, TODAY)
+    assert "isoformat" not in str(ei.value)
+    assert db.list_goals(seeded) == []
+
+def test_apply_action_update_budget_missing_amount_clean_error(seeded):
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        advisor.apply_action(seeded, {"type": "update_budget",
+                                      "category": "Food out"}, TODAY)
+    assert "amount_ils" not in str(ei.value)
+
+def test_apply_action_adjust_setting_missing_key_clean_error(seeded):
+    import pytest
+    with pytest.raises(ValueError) as ei:
+        advisor.apply_action(seeded, {"type": "adjust_setting",
+                                      "value": "7"}, TODAY)
+    assert "'key'" not in str(ei.value)  # no raw KeyError('key')
