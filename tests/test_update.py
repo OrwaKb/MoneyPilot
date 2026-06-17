@@ -80,7 +80,8 @@ def test_check_update_network_error_is_silent(configured, monkeypatch):
 
 
 def test_check_update_dormant_when_repo_unset(monkeypatch):
-    # default GITHUB_REPO is the placeholder -> must NOT touch the network at all
+    # an unconfigured/placeholder repo must NOT touch the network at all
+    monkeypatch.setattr(version, "GITHUB_REPO", "YOUR_GITHUB_USERNAME/MoneyPilot")
     hits = {"n": 0}
     def counted(*a, **k):
         hits["n"] += 1
@@ -88,3 +89,8 @@ def test_check_update_dormant_when_repo_unset(monkeypatch):
     monkeypatch.setattr(update.requests, "get", counted)
     assert update.check_for_update(current="1.0.0")["update_available"] is False
     assert hits["n"] == 0
+
+
+def test_repo_configured_true_for_real_default():
+    # the shipped default is now a real repo, so the feature is live
+    assert update._repo_configured() is True
