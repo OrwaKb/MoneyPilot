@@ -74,7 +74,7 @@ def chat(conn, text: str, today: dt.date, conversation_id=None) -> dict:
         reply = client.ask_claude(
             prompts.CHAT_USER_TMPL.format(facts=json.dumps(fp),
                                           history=history, question=text),
-            system=prompts.CHAT_SYSTEM, timeout_s=60)
+            system=prompts.CHAT_SYSTEM, timeout_s=60, web=True)
     except client.AIUnavailable as e:
         # Genuine AI outage → graceful offline reply. Other (unexpected)
         # exceptions are bugs and must surface, not hide behind "offline".

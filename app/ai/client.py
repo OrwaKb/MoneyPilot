@@ -22,20 +22,35 @@ def extract_json(text: str, opener: str = "["):
     return obj
 
 
-def _via_sdk(prompt: str, system, timeout_s: int) -> str:
-    """Claude Agent SDK transport — rides the local Claude Code login."""
+def _via_sdk(prompt: str, system, timeout_s: int, web: bool = False) -> str:
+    """Claude Agent SDK transport — rides the local Claude Code login.
+
+    web=True opts into web search (chat only): expose ONLY WebSearch and allow
+    several turns for the search->read->answer round-trip. web=False keeps the
+    model tool-free for FACTS-only callers (briefing, parser, onboarding)."""
     import anyio
     from claude_agent_sdk import ClaudeAgentOptions, query
 
     async def _run():
-        # tools=[] makes the CLI receive `--tools ""` — an EMPTY base toolset.
-        # This is load-bearing: the advisor answers from FACTS + general
-        # knowledge only, and with max_turns=1 any tool call is fatal (on an
-        # internet-ish question the model spends its single turn on a WebSearch
-        # call and the SDK returns error_max_turns instead of an answer).
-        # allowed_tools=[] does NOT achieve this: an empty allow-list is falsy,
-        # so the SDK omits --allowedTools and every default tool stays available.
-        opts = ClaudeAgentOptions(system_prompt=system, max_turns=1, tools=[])
+        if web:
+            # Give the model EXACTLY WebSearch — both exposed (`tools`) and
+            # auto-approved (`allowed_tools`), so no shell/file tool is reachable
+            # and no permission prompt blocks it headless. max_turns>1 is
+            # essential: a tool call costs a turn, so at max_turns=1 the model
+            # would die on error_max_turns before it could answer (the very bug
+            # that made the advisor crash on internet questions).
+            opts = ClaudeAgentOptions(system_prompt=system, max_turns=6,
+                                      tools=["WebSearch"],
+                                      allowed_tools=["WebSearch"])
+        else:
+            # tools=[] makes the CLI receive `--tools ""` — an EMPTY base toolset.
+            # This is load-bearing: the model answers from FACTS + general
+            # knowledge only, and with max_turns=1 any tool call is fatal (on an
+            # internet-ish question the model spends its single turn on a tool
+            # call and the SDK returns error_max_turns instead of an answer).
+            # allowed_tools=[] does NOT achieve this: an empty allow-list is
+            # falsy, so the SDK omits --allowedTools and every tool stays live.
+            opts = ClaudeAgentOptions(system_prompt=system, max_turns=1, tools=[])
         result = None
         with anyio.move_on_after(timeout_s):
             async for message in query(prompt=prompt, options=opts):
@@ -52,16 +67,23 @@ def _via_sdk(prompt: str, system, timeout_s: int) -> str:
     return anyio.run(_run)
 
 
-def _via_cli(prompt: str, system, timeout_s: int) -> str:
-    """`claude -p` headless transport — same login, zero extra deps."""
+def _via_cli(prompt: str, system, timeout_s: int, web: bool = False) -> str:
+    """`claude -p` headless transport — same login, zero extra deps.
+
+    Mirrors _via_sdk's tool policy: web=True exposes+allows only WebSearch with
+    several turns; web=False stays tool-free (empty base toolset, one turn)."""
     exe = shutil.which("claude")
     if not exe:
         raise AIUnavailable("claude CLI not found on PATH")
-    # --tools "" gives an empty base toolset (mirrors _via_sdk): the fallback
-    # must also stay tool-free, or an internet-ish question burns its one turn on
-    # a WebSearch call and exits non-zero / empty -> a needless "Advisor offline".
-    cmd = [exe, "-p", "--output-format", "json", "--max-turns", "1",
-           "--tools", ""]
+    if web:
+        cmd = [exe, "-p", "--output-format", "json", "--max-turns", "6",
+               "--tools", "WebSearch", "--allowedTools", "WebSearch"]
+    else:
+        # --tools "" gives an empty base toolset (mirrors _via_sdk): the fallback
+        # must also stay tool-free, or an internet-ish question burns its one turn
+        # on a tool call and exits non-zero / empty -> a needless "Advisor offline".
+        cmd = [exe, "-p", "--output-format", "json", "--max-turns", "1",
+               "--tools", ""]
     if system:
         cmd += ["--append-system-prompt", system]
     try:
@@ -86,13 +108,17 @@ def _via_cli(prompt: str, system, timeout_s: int) -> str:
     return str(out)
 
 
-def ask_claude(prompt: str, system=None, timeout_s: int = 60) -> str:
-    """Primary: Agent SDK. Fallback: claude -p. Raises AIUnavailable if both fail."""
+def ask_claude(prompt: str, system=None, timeout_s: int = 60,
+               web: bool = False) -> str:
+    """Primary: Agent SDK. Fallback: claude -p. Raises AIUnavailable if both fail.
+
+    web=True lets the model use web search (chat uses this for live data); the
+    default keeps every other caller tool-free."""
     try:
-        return _via_sdk(prompt, system, timeout_s)
+        return _via_sdk(prompt, system, timeout_s, web)
     except Exception as sdk_exc:
         try:
-            return _via_cli(prompt, system, timeout_s)
+            return _via_cli(prompt, system, timeout_s, web)
         except AIUnavailable as cli_exc:
             # Both transports failed. Log the detail so a recurrence is
             # diagnosable — the GUI suppresses consoles, so this file log is

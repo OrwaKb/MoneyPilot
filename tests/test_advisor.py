@@ -36,6 +36,28 @@ def test_chat_plain_reply(seeded, monkeypatch):
     roles = [c["role"] for c in db.recent_chat(seeded, 10)]
     assert roles == ["user", "assistant"]
 
+def test_chat_requests_web_search(seeded, monkeypatch):
+    # Chat opts into browsing so the advisor can answer live-data questions
+    # (FX rates, prices). The FACTS-only briefing must NOT (kept fast + tool-free).
+    seen = {}
+    def fake_ask(user, system=None, timeout_s=0, web=False):
+        seen.setdefault("web", web)
+        return "ok"
+    monkeypatch.setattr(advisor.client, "ask_claude", fake_ask)
+    advisor.chat(seeded, "what's the dollar at today?", TODAY)
+    assert seen["web"] is True
+
+
+def test_briefing_stays_tool_free(seeded, monkeypatch):
+    seen = {}
+    def fake_ask(user, system=None, timeout_s=0, web=False):
+        seen["web"] = web
+        return "All systems nominal."
+    monkeypatch.setattr(advisor.client, "ask_claude", fake_ask)
+    advisor.get_briefing(seeded, TODAY)
+    assert seen["web"] is False
+
+
 def test_chat_extracts_action_block(seeded, monkeypatch):
     reply = ('I will create that goal.\n```action\n'
              '{"type": "create_goal", "name": "Trip", '
@@ -91,7 +113,7 @@ def test_chat_title_truncates_at_48(seeded, monkeypatch):
 def test_chat_continues_same_conversation_with_memory(seeded, monkeypatch):
     seen = {}
 
-    def fake_ask(user, system=None, timeout_s=0):
+    def fake_ask(user, system=None, timeout_s=0, web=False):
         seen["user"] = user
         return "second reply"
 
