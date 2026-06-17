@@ -60,13 +60,10 @@ def check_for_update(current: str | None = None, timeout_s: int = 5) -> dict:
     latest = str(data.get("tag_name") or "")
     if not _is_newer(latest, current):
         return {"update_available": False}
-    # Prefer a direct .zip asset; fall back to the release page.
-    url = data.get("html_url")
-    for a in (data.get("assets") or []):
-        if str(a.get("name", "")).lower().endswith(".zip"):
-            url = a.get("browser_download_url") or url
-            break
+    # Point at the release PAGE (which lists the installer + zip + notes), not a
+    # single asset — friends should grab the installer rather than re-unzip a zip
+    # into OneDrive (the path that caused the .NET-loader crash).
     return {"update_available": True,
             "version": latest.lstrip("vV"),
-            "url": url,
+            "url": data.get("html_url"),
             "notes": (data.get("body") or "").strip()[:500]}

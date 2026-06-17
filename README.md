@@ -28,11 +28,17 @@ shortcut; pass `-Autostart` to also launch it at login.
 Build a standalone Windows app a friend downloads and runs on their own PC —
 their data lives on their machine, no tunnel, no PC-of-yours-staying-on.
 
-    powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+    powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1        # 1. the app folder + zip
+    powershell -ExecutionPolicy Bypass -File scripts\build_installer.ps1  # 2. the installer
 
-Produces `dist\MoneyPilot-windows.zip` (~300 MB — it bundles the Claude
-runtime). Send that; the friend unzips and runs `MoneyPilot.exe`. Smoke-test
-the build headlessly with `dist\MoneyPilot\MoneyPilot.exe --selftest`.
+Step 1 produces `dist\MoneyPilot-windows.zip`; step 2 wraps the built folder
+into `dist\MoneyPilot-Setup.exe` (~70 MB, Inno Setup — `winget install
+JRSoftware.InnoSetup` once). **Send the installer** — it installs to
+`%LOCALAPPDATA%\Programs\MoneyPilot` (no admin, and a path OneDrive never
+syncs), which avoids the pythonnet/.NET launch crash that hits zips unpacked
+into OneDrive. The zip still works as a fallback **if** unpacked to a plain
+local folder like `C:\MoneyPilot` (never inside OneDrive/Desktop). Smoke-test
+headlessly with `dist\MoneyPilot\MoneyPilot.exe --selftest`.
 
 The whole tracker works offline. The **AI** (advisor, briefing, auto-categorize)
 needs the friend's *own* Claude login: they open the **Advisor** tab and click
@@ -57,9 +63,11 @@ One-time:
 
 Each release:
 1. Bump `__version__` in `app/version.py` (e.g. `1.1.0`).
-2. `powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1`
+2. `scripts\build_exe.ps1` then `scripts\build_installer.ps1`
 3. Publish a GitHub Release tagged `v<version>` (matching `__version__`) with
-   `dist\MoneyPilot-windows.zip` attached. Friends get the banner next launch.
+   `dist\MoneyPilot-Setup.exe` attached (and the zip if you like). Friends get
+   the in-app banner next launch; it links to the release page so they grab the
+   installer.
 
 ## Share with a friend (web)
 

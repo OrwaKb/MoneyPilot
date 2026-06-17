@@ -1,29 +1,34 @@
 MoneyPilot — your personal finance cockpit
 ===========================================
 
-GETTING STARTED
-  1) Unzip this whole folder somewhere you'll keep it (e.g. your Desktop).
-  2) Double-click  MoneyPilot.exe  to start.
-  3) The first run walks you through a quick setup (salary, payday, balance).
+EASIEST: run the installer
+  Run  MoneyPilot-Setup.exe  and click through it. It installs MoneyPilot for
+  you (no admin needed), adds a Start-menu shortcut, and you're done. This is
+  the recommended way.
 
-Your data stays on YOUR computer, in:
-  C:\Users\<you>\AppData\Local\MoneyPilot
-Nothing is uploaded anywhere. Daily backups are saved next to it automatically.
+  (Windows may show "Windows protected your PC" because the app isn't paid-code-
+  signed. Click "More info" -> "Run anyway". It's safe.)
 
+USING THE ZIP INSTEAD?
+  If you have MoneyPilot-windows.zip rather than the installer, unzip it to a
+  PLAIN LOCAL FOLDER such as  C:\MoneyPilot
+  *** Do NOT run it from inside OneDrive or your Desktop ***  — OneDrive turns
+  files into cloud placeholders and the app fails to start there. Then run
+  MoneyPilot.exe from C:\MoneyPilot.
+
+FIRST RUN
+  A quick setup walks you through salary, payday, and your current balance.
+  Your data stays on YOUR computer (C:\Users\<you>\AppData\Local\MoneyPilot) and
+  is never uploaded. Daily backups are kept beside it automatically.
 
 THE AI ADVISOR (optional)
-  The chat advisor, the daily briefing, and smart auto-categorizing of what you
-  type use Claude. They need your OWN Claude account:
-    - Open the ADVISOR tab and click "Connect AI".
-    - A sign-in window opens — sign in with your Claude account, then come back
-      and click "re-check".
-  This works with a Claude Pro or Max subscription. Without it, the AI just
-  shows "not connected" and EVERYTHING ELSE still works — tracking spending,
-  budgets, the rolling daily allowance, goals, and CSV export.
-
+  The chat advisor, the daily briefing, and smart auto-categorizing use Claude
+  and need your OWN Claude account (Pro/Max). Open the ADVISOR tab and click
+  "Connect AI" to sign in. Without it, the AI just shows "not connected" and
+  EVERYTHING ELSE still works — tracking, budgets, the daily allowance, goals,
+  and CSV export.
 
 NOTES
-  - Windows 10 or 11.
+  - Windows 10 or 11 (64-bit).
   - If the window is blank on first launch, install Microsoft's free
-    "WebView2 Runtime" (search that name), then reopen MoneyPilot.
-  - The first start can take a few seconds while it warms up.
+    "WebView2 Runtime" (search that name), then reopen.

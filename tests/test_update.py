@@ -53,7 +53,8 @@ def test_check_update_available(configured, monkeypatch):
     out = update.check_for_update(current="1.0.0")
     assert out["update_available"] is True
     assert out["version"] == "1.2.0"
-    assert out["url"].endswith("MoneyPilot-windows.zip")
+    # download points at the release PAGE (installer + zip + notes), not an asset
+    assert out["url"] == "https://github.com/alice/MoneyPilot/releases/tag/v1.2.0"
     assert out["notes"].startswith("Faster startup.")
 
 
