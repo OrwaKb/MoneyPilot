@@ -1,0 +1,94 @@
+/* MoneyPilot Pocket — mobile-first, dark cockpit palette (matches app.css). */
+:root {
+  --bg: #0d1117; --panel: #141b26; --line: #26334a;
+  --accent: #4ef0c0; --amber: #ffb46b; --red: #ff6b7a;
+  --txt: #c7d6ea; --muted: #7e8ca3;
+  --accent-glow: rgba(78, 240, 192, .35);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--txt);
+  font: 16px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif;
+  display: flex; flex-direction: column; min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+}
+.brand { color: var(--accent); letter-spacing: 2px; font-size: 14px; font-weight: 600; }
+.brand b { color: var(--txt); }
+.sync-badge {
+  border: 1px solid var(--line); background: var(--panel); color: var(--muted);
+  border-radius: 999px; padding: 5px 12px; font-size: 12px; min-height: 32px;
+}
+.sync-badge.ok { color: var(--accent); border-color: var(--accent-glow); }
+.sync-badge.wait { color: var(--amber); border-color: rgba(255,180,107,.4); }
+.sync-badge.off { color: var(--muted); }
+
+main { flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+.add { display: flex; flex-direction: column; gap: 10px; }
+#add-input {
+  width: 100%; padding: 16px; font-size: 17px;
+  background: var(--panel); color: var(--txt);
+  border: 1px solid var(--line); border-radius: 12px;
+}
+#add-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.big {
+  width: 100%; padding: 16px; font-size: 16px; font-weight: 700; letter-spacing: 1px;
+  color: #06231b; background: var(--accent); border: 0; border-radius: 12px;
+  min-height: 52px;
+}
+.big:active { filter: brightness(.9); }
+.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 12px; padding: 14px; min-height: 52px; }
+
+.today { display: flex; align-items: baseline; justify-content: space-between;
+  padding: 2px 4px; }
+.today-label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
+.today-total { font-size: 22px; font-weight: 700; color: var(--txt); }
+
+.empty { color: var(--muted); text-align: center; padding: 30px 10px; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.item {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+}
+.item .txt { flex: 1; min-width: 0; }
+.item .desc { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .meta { color: var(--muted); font-size: 12px; }
+.item .amt { font-weight: 700; }
+.item .state { font-size: 13px; }
+.item .state.synced { color: var(--accent); }
+.item .state.wait { color: var(--amber); }
+.item .del {
+  background: transparent; border: 0; color: var(--muted); font-size: 20px; padding: 4px 6px;
+}
+.item.is-synced .del { display: none; }
+
+.settings-fab {
+  position: fixed; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom));
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--panel); color: var(--txt); border: 1px solid var(--line); font-size: 22px;
+}
+dialog#settings { background: var(--panel); color: var(--txt); border: 1px solid var(--line);
+  border-radius: 14px; padding: 18px; width: min(92vw, 420px); }
+dialog#settings::backdrop { background: rgba(0,0,0,.6); }
+.settings-form h2 { margin: 0 0 6px; font-size: 18px; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+.settings-form label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.settings-form input { width: 100%; margin-top: 5px; padding: 12px; font-size: 16px;
+  background: var(--bg); color: var(--txt); border: 1px solid var(--line); border-radius: 10px; }
+.settings-actions { display: flex; gap: 10px; margin-top: 4px; }
+.settings-actions .big, .settings-actions .ghost { flex: 1; }
+
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(80px + env(safe-area-inset-bottom));
+  background: var(--line); color: var(--txt); padding: 10px 16px; border-radius: 10px;
+  font-size: 14px; max-width: 90vw; text-align: center; transition: opacity .2s;
+}
+.toast.hidden { opacity: 0; pointer-events: none; }

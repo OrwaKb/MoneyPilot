@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pocket">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="pocket.css">
+<title>MoneyPilot Pocket</title>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">MONEYPILOT <b>POCKET</b></span>
+  <button id="sync-badge" class="sync-badge" title="Sync status">…</button>
+</header>
+
+<main>
+  <form id="add-form" class="add">
+    <input id="add-input" autocomplete="off" autocapitalize="off"
+           enterkeyhint="done"
+           placeholder='what did you spend?  e.g. "45 falafel with karim"'>
+    <button id="add-btn" type="submit" class="big">LOG IT</button>
+  </form>
+
+  <div class="today">
+    <span class="today-label">logged today</span>
+    <span id="today-total" class="today-total">₪0</span>
+  </div>
+
+  <div id="empty" class="empty">Nothing yet — log your first expense above.</div>
+  <ul id="list" class="list"></ul>
+</main>
+
+<button id="open-settings" class="settings-fab" title="Setup">⚙</button>
+
+<dialog id="settings">
+  <form method="dialog" class="settings-form">
+    <h2>Connect to home</h2>
+    <p class="hint">Pair once with your home MoneyPilot (from the desktop's
+      “Pocket setup” screen). Until then, entries just queue here on the phone.</p>
+    <label>Home address (Tailscale URL)
+      <input id="cfg-url" inputmode="url" placeholder="https://your-pc.your-tailnet.ts.net"></label>
+    <label>Pairing token
+      <input id="cfg-token" placeholder="paste the token"></label>
+    <div class="settings-actions">
+      <button id="cfg-cancel" value="cancel" class="ghost">Cancel</button>
+      <button id="cfg-save" value="save" class="big">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden"></div>
+<script src="pocket.js"></script>
+</body>
+</html>
