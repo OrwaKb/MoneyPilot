@@ -43,6 +43,24 @@ The packaging is bundle-aware via `app/paths.py` (`resource_path()` for UI
 assets, `data_dir()` for the ledger/backups/log under `%LOCALAPPDATA%`); the
 PyInstaller recipe is `MoneyPilot.spec`, entry point `run_app.py`.
 
+### Releasing updates
+
+The app checks GitHub for a newer release on launch and shows a "Download"
+banner (data is safe across updates — it lives in `%LOCALAPPDATA%`, separate
+from the app folder, and schema migrations run automatically). Setup is once;
+each release is three steps.
+
+One-time:
+1. Create a GitHub repo and push this project.
+2. Set `GITHUB_REPO = "<you>/<repo>"` in `app/version.py` (until then the
+   update check is dormant — zero network calls).
+
+Each release:
+1. Bump `__version__` in `app/version.py` (e.g. `1.1.0`).
+2. `powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1`
+3. Publish a GitHub Release tagged `v<version>` (matching `__version__`) with
+   `dist\MoneyPilot-windows.zip` attached. Friends get the banner next launch.
+
 ## Share with a friend (web)
 
 Run MoneyPilot from your PC so a friend can log in from a browser. Data stays

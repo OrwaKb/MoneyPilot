@@ -93,6 +93,14 @@
   <div id="chips"></div>
 </div>
 
+<div id="update-bar" class="update-bar hidden">
+  <span id="update-msg"></span>
+  <span class="update-actions">
+    <button id="update-dl" class="btn primary">Download</button>
+    <button id="update-x" class="btn ghost" title="dismiss">✕</button>
+  </span>
+</div>
+
 <nav id="tabs">
   <button class="tab active" data-tab="overview">OVERVIEW</button>
   <button class="tab" data-tab="ledger">LEDGER</button>
@@ -239,6 +247,7 @@
       </div>
     </div>
     <div class="settings-actions">
+      <span id="set-version" class="sub set-version"></span>
       <span id="set-status" class="sub"></span>
       <button id="set-save" class="btn primary">SAVE CHANGES</button>
     </div>

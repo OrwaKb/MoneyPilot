@@ -62,6 +62,7 @@ class Api:
     @_safe
     def startup(self):
         """Called by the UI once on load: backup + best-effort review resweep."""
+        from app import version
         with self._lock:
             try:
                 db.write_daily_backup(self.conn, self.backup_dir, self._today())
@@ -72,7 +73,26 @@ class Api:
             except Exception:
                 pass  # offline is fine
         return {"onboarded": self.is_onboarded(),
-                "user_name": db.get_setting(self.conn, "user_name", "")}
+                "user_name": db.get_setting(self.conn, "user_name", ""),
+                "version": version.__version__}
+
+    @_safe
+    def check_update(self):
+        """Whether a newer build exists (desktop only). Fail-silent in update.py
+        so a slow/absent network never blocks or breaks the UI."""
+        from app import update
+        return update.check_for_update()
+
+    @_safe
+    def open_external(self, url: str):
+        """Open a link in the user's real browser (e.g. the update download).
+        http/https only — never a file:// or other scheme from a reply."""
+        import webbrowser
+        u = str(url or "")
+        if not (u.startswith("https://") or u.startswith("http://")):
+            raise ValueError("refusing to open a non-web link")
+        webbrowser.open(u)
+        return {}
 
     # --- entries ---------------------------------------------------------------
 

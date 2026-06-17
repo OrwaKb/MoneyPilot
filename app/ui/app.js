@@ -155,6 +155,7 @@ async function submitEntry() {
     (e) => { if (e.key === "Enter") submitEntry(); });
   const st = await api("startup");
   if (!st.ok) { toast(st.error); return; }
+  if (st.version) $("#set-version").textContent = "MoneyPilot v" + st.version;
   if (!st.onboarded) {
     if (typeof window.startOnboarding === "function") window.startOnboarding();
     else toast("Onboarding UI not built yet (Task 19).");
@@ -162,6 +163,7 @@ async function submitEntry() {
   }
   await refreshAll();
   refreshAiStatus();   // desktop only; surfaces the Connect-AI prompt if offline
+  checkForUpdate();    // desktop only; shows the update bar if a newer build exists
 })();
 
 /* --- OVERVIEW ------------------------------------------------------------ */
@@ -679,6 +681,25 @@ $("#ai-recheck-btn").addEventListener("click", async () => {
 });
 
 $('[data-tab="advisor"]').addEventListener("click", refreshAiStatus);
+
+/* --- app update banner (desktop only; the web build is always current) ----- */
+let _updateUrl = null;
+async function checkForUpdate() {
+  if (WEB) return;
+  const res = await api("check_update");
+  if (!res.ok || !res.update_available) return;
+  _updateUrl = res.url;
+  const note = (res.notes || "").split("\n")[0].slice(0, 90);
+  $("#update-msg").textContent =
+    `MoneyPilot v${res.version} is available.` + (note ? "  " + note : "");
+  $("#update-bar").classList.remove("hidden");
+}
+
+$("#update-dl").addEventListener("click", () => {
+  if (_updateUrl) api("open_external", _updateUrl);
+});
+$("#update-x").addEventListener("click", () =>
+  $("#update-bar").classList.add("hidden"));
 
 $("#ch-send").addEventListener("click", chatSend);
 $("#ch-input").addEventListener("keydown",

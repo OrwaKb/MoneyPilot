@@ -486,3 +486,18 @@ td input, td select { background: var(--bg); color: var(--txt);
   color: var(--amber); font-size: 13px; line-height: 1.4;
 }
 .ai-connect .ai-connect-actions { display: flex; gap: 8px; flex: 0 0 auto; }
+
+/* --- app update banner (desktop only; web build is always current) --------- */
+.update-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 16px; font-size: 13px; color: var(--blue);
+  background: rgba(45, 168, 255, .12);
+  border-bottom: 1px solid rgba(45, 168, 255, .40);
+}
+.update-bar .update-actions { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.btn.ghost {
+  background: transparent; border-color: transparent; box-shadow: none;
+  padding: 4px 9px; opacity: .75;
+}
+.btn.ghost:hover { opacity: 1; }
+.set-version { opacity: .6; margin-right: auto; }

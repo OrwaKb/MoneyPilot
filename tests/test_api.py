@@ -28,6 +28,35 @@ def api(tmp_path, monkeypatch):
     return a
 
 
+def test_startup_reports_version(api):
+    from app import version
+    assert api.startup()["version"] == version.__version__
+
+
+def test_check_update_bridges(api, monkeypatch):
+    from app import update
+    monkeypatch.setattr(update, "check_for_update",
+                        lambda *a, **k: {"update_available": True, "version": "9.9"})
+    out = api.check_update()
+    assert out["ok"] is True and out["update_available"] is True
+
+
+def test_open_external_allows_https(api, monkeypatch):
+    seen = {}
+    import webbrowser
+    monkeypatch.setattr(webbrowser, "open", lambda u: seen.setdefault("u", u))
+    assert api.open_external("https://github.com/x/y/releases")["ok"] is True
+    assert seen["u"].startswith("https://")
+
+
+def test_open_external_rejects_non_web_scheme(api, monkeypatch):
+    import webbrowser
+    monkeypatch.setattr(webbrowser, "open",
+                        lambda u: (_ for _ in ()).throw(AssertionError("opened!")))
+    out = api.open_external("file:///C:/Windows/System32")
+    assert out["ok"] is False and out["error_kind"] == "user"
+
+
 def test_ai_status_bridges_client(api, monkeypatch):
     from app.ai import client
     monkeypatch.setattr(client, "ai_auth_status",
