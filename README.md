@@ -23,6 +23,26 @@ shortcut; pass `-Autostart` to also launch it at login.
     .venv\Scripts\python -m app --dev       # seeded fake ledger + DevTools
     .venv\Scripts\python -m app --restore backups\ledger-YYYY-MM-DD.json
 
+## Send a friend the app (.exe)
+
+Build a standalone Windows app a friend downloads and runs on their own PC —
+their data lives on their machine, no tunnel, no PC-of-yours-staying-on.
+
+    powershell -ExecutionPolicy Bypass -File scripts\build_exe.ps1
+
+Produces `dist\MoneyPilot-windows.zip` (~300 MB — it bundles the Claude
+runtime). Send that; the friend unzips and runs `MoneyPilot.exe`. Smoke-test
+the build headlessly with `dist\MoneyPilot\MoneyPilot.exe --selftest`.
+
+The whole tracker works offline. The **AI** (advisor, briefing, auto-categorize)
+needs the friend's *own* Claude login: they open the **Advisor** tab and click
+**Connect AI** (a Claude Pro/Max account). Friend-facing notes live in
+`packaging\READ-ME-FIRST.txt`, which the build drops into the zip.
+
+The packaging is bundle-aware via `app/paths.py` (`resource_path()` for UI
+assets, `data_dir()` for the ledger/backups/log under `%LOCALAPPDATA%`); the
+PyInstaller recipe is `MoneyPilot.spec`, entry point `run_app.py`.
+
 ## Share with a friend (web)
 
 Run MoneyPilot from your PC so a friend can log in from a browser. Data stays

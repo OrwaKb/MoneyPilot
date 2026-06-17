@@ -161,6 +161,7 @@ async function submitEntry() {
     return;
   }
   await refreshAll();
+  refreshAiStatus();   // desktop only; surfaces the Connect-AI prompt if offline
 })();
 
 /* --- OVERVIEW ------------------------------------------------------------ */
@@ -645,6 +646,39 @@ $("#ch-new").addEventListener("click", () => {
   pendingActionEl = null;
   renderers.advisor();
 });
+
+/* --- AI connection banner ------------------------------------------------- *
+ * On a friend's own PC the app has no Claude login, so the advisor is offline
+ * until they sign in. Show a one-tap "Connect AI" that opens the Claude sign-in.
+ * The web build always rides the host's login, so it never shows this.        */
+async function refreshAiStatus() {
+  const banner = $("#ai-connect");
+  if (!banner) return;
+  if (WEB) { banner.classList.add("hidden"); return; }
+  const res = await api("ai_status");
+  const connected = res.ok && res.connected;
+  banner.classList.toggle("hidden", connected);
+  if (!connected) {
+    $("#ai-connect-msg").textContent =
+      "AI isn't connected on this PC — sign in with your Claude account to use " +
+      "the advisor. Everything else works without it.";
+  }
+}
+
+$("#ai-connect-btn").addEventListener("click", async () => {
+  const res = await api("connect_ai");
+  if (!res.ok) { toast(res.error); return; }
+  toast("A sign-in window opened — finish signing in there, then re-check.");
+  $("#ai-recheck-btn").classList.remove("hidden");
+});
+
+$("#ai-recheck-btn").addEventListener("click", async () => {
+  await refreshAiStatus();
+  toast($("#ai-connect").classList.contains("hidden")
+        ? "AI connected ✓" : "Still not connected — finish signing in, then re-check.");
+});
+
+$('[data-tab="advisor"]').addEventListener("click", refreshAiStatus);
 
 $("#ch-send").addEventListener("click", chatSend);
 $("#ch-input").addEventListener("keydown",

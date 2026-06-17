@@ -2,10 +2,82 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 
 log = logging.getLogger("moneypilot.ai")
+
+_CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+_CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+
+
+def bundled_claude_exe() -> str | None:
+    """Absolute path to the Agent SDK's bundled Claude CLI, if present.
+
+    In a packaged build friends have no `claude` on PATH, so the SDK's own
+    bundled binary is what powers both the AI and the sign-in flow. Returns
+    None if the SDK (or its binary) isn't there. Handles the frozen
+    (PyInstaller) layout, where package __file__ isn't reliable but the data is
+    collected under sys._MEIPASS."""
+    name = "claude.exe" if os.name == "nt" else "claude"
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:  # frozen: data collected at <bundle>/claude_agent_sdk/_bundled/
+        candidates.append(Path(meipass) / "claude_agent_sdk" / "_bundled" / name)
+    try:
+        import claude_agent_sdk as sdk
+        if getattr(sdk, "__file__", None):
+            candidates.append(Path(sdk.__file__).resolve().parent / "_bundled" / name)
+    except Exception:
+        pass
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return str(p)
+    return None
+
+
+def _claude_for_auth() -> str | None:
+    """Claude binary to drive `auth` with: prefer the bundled one (always there
+    in a packaged app), fall back to a PATH install (dev machines)."""
+    return bundled_claude_exe() or shutil.which("claude")
+
+
+def ai_auth_status(timeout_s: int = 20) -> dict:
+    """Is the AI usable on this machine? Runs `claude auth status` (JSON) and
+    returns {connected, email, plan}. Never raises — a missing binary / error
+    just means not connected."""
+    exe = _claude_for_auth()
+    if not exe:
+        return {"connected": False, "reason": "claude binary not found"}
+    try:
+        res = subprocess.run([exe, "auth", "status"], capture_output=True,
+                             text=True, encoding="utf-8", errors="replace",
+                             timeout=timeout_s, creationflags=_CREATE_NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"connected": False, "reason": str(e)}
+    try:
+        data = json.loads(res.stdout)
+    except (json.JSONDecodeError, AttributeError):
+        # API-key auth (or older CLIs) may not print JSON; trust the exit code.
+        connected = res.returncode == 0 and bool(os.environ.get("ANTHROPIC_API_KEY"))
+        return {"connected": connected}
+    return {"connected": bool(data.get("loggedIn")),
+            "email": data.get("email"),
+            "plan": data.get("subscriptionType")}
+
+
+def start_ai_login() -> None:
+    """Launch `claude auth login` in its OWN visible console so the friend can
+    follow the browser sign-in. Returns immediately; the UI re-checks status.
+    The CREATE_NEW_CONSOLE flag also defeats __main__'s console-suppressor."""
+    exe = _claude_for_auth()
+    if not exe:
+        raise AIUnavailable("Claude runtime not found — can't start sign-in.")
+    subprocess.Popen([exe, "auth", "login"],
+                     creationflags=_CREATE_NEW_CONSOLE or 0)
 
 
 class AIUnavailable(Exception):

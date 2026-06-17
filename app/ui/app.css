@@ -477,3 +477,12 @@ td input, td select { background: var(--bg); color: var(--txt);
     transition-duration: .01ms !important;
   }
 }
+
+/* --- AI-not-connected banner (desktop only; web uses the host login) ------- */
+.ai-connect {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 0 0 10px; padding: 10px 14px; border-radius: 10px;
+  background: rgba(255, 180, 107, .10); border: 1px solid rgba(255, 180, 107, .38);
+  color: var(--amber); font-size: 13px; line-height: 1.4;
+}
+.ai-connect .ai-connect-actions { display: flex; gap: 8px; flex: 0 0 auto; }

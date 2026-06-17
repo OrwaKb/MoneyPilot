@@ -28,6 +28,32 @@ def api(tmp_path, monkeypatch):
     return a
 
 
+def test_ai_status_bridges_client(api, monkeypatch):
+    from app.ai import client
+    monkeypatch.setattr(client, "ai_auth_status",
+                        lambda *a, **k: {"connected": True, "plan": "pro"})
+    out = api.ai_status()
+    assert out["ok"] is True and out["connected"] is True and out["plan"] == "pro"
+
+
+def test_connect_ai_invokes_login(api, monkeypatch):
+    from app.ai import client
+    called = {}
+    monkeypatch.setattr(client, "start_ai_login",
+                        lambda: called.setdefault("hit", True))
+    assert api.connect_ai()["ok"] is True
+    assert called.get("hit") is True
+
+
+def test_connect_ai_reports_error_cleanly(api, monkeypatch):
+    from app.ai import client
+    def boom():
+        raise client.AIUnavailable("no claude")
+    monkeypatch.setattr(client, "start_ai_login", boom)
+    out = api.connect_ai()
+    assert out["ok"] is False and "claude" in out["error"].lower()
+
+
 def test_not_onboarded_until_settings(tmp_path):
     a = Api(tmp_path / "x.db", backup_dir=tmp_path / "b",
             today_fn=lambda: TODAY)

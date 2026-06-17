@@ -1,0 +1,29 @@
+MoneyPilot — your personal finance cockpit
+===========================================
+
+GETTING STARTED
+  1) Unzip this whole folder somewhere you'll keep it (e.g. your Desktop).
+  2) Double-click  MoneyPilot.exe  to start.
+  3) The first run walks you through a quick setup (salary, payday, balance).
+
+Your data stays on YOUR computer, in:
+  C:\Users\<you>\AppData\Local\MoneyPilot
+Nothing is uploaded anywhere. Daily backups are saved next to it automatically.
+
+
+THE AI ADVISOR (optional)
+  The chat advisor, the daily briefing, and smart auto-categorizing of what you
+  type use Claude. They need your OWN Claude account:
+    - Open the ADVISOR tab and click "Connect AI".
+    - A sign-in window opens — sign in with your Claude account, then come back
+      and click "re-check".
+  This works with a Claude Pro or Max subscription. Without it, the AI just
+  shows "not connected" and EVERYTHING ELSE still works — tracking spending,
+  budgets, the rolling daily allowance, goals, and CSV export.
+
+
+NOTES
+  - Windows 10 or 11.
+  - If the window is blank on first launch, install Microsoft's free
+    "WebView2 Runtime" (search that name), then reopen MoneyPilot.
+  - The first start can take a few seconds while it warms up.

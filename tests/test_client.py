@@ -129,6 +129,57 @@ def test_cli_transport_launch_oserror_raises_unavailable(monkeypatch):
         client._via_cli("hi", None, 5)
 
 
+def test_bundled_claude_exe_found():
+    # the SDK ships a bundled CLI; the auth flow + frozen builds depend on it
+    p = client.bundled_claude_exe()
+    assert p and p.endswith("claude.exe") and __import__("os").path.exists(p)
+
+
+def test_ai_auth_status_parses_logged_in(monkeypatch):
+    monkeypatch.setattr(client, "_claude_for_auth", lambda: r"C:\fake\claude.exe")
+    def fake_run(cmd, **kw):
+        assert cmd[1:] == ["auth", "status"]
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(
+            {"loggedIn": True, "email": "a@b.com", "subscriptionType": "pro"}),
+            stderr="")
+    monkeypatch.setattr(client.subprocess, "run", fake_run)
+    st = client.ai_auth_status()
+    assert st == {"connected": True, "email": "a@b.com", "plan": "pro"}
+
+
+def test_ai_auth_status_not_logged_in(monkeypatch):
+    monkeypatch.setattr(client, "_claude_for_auth", lambda: r"C:\fake\claude.exe")
+    monkeypatch.setattr(client.subprocess, "run", lambda cmd, **kw:
+        subprocess.CompletedProcess(cmd, 0,
+            stdout=json.dumps({"loggedIn": False}), stderr=""))
+    assert client.ai_auth_status()["connected"] is False
+
+
+def test_ai_auth_status_no_binary(monkeypatch):
+    monkeypatch.setattr(client, "_claude_for_auth", lambda: None)
+    assert client.ai_auth_status()["connected"] is False
+
+
+def test_start_ai_login_spawns_visible_console(monkeypatch):
+    monkeypatch.setattr(client, "_claude_for_auth", lambda: r"C:\fake\claude.exe")
+    seen = {}
+    def fake_popen(cmd, **kw):
+        seen["cmd"] = cmd
+        seen["flags"] = kw.get("creationflags")
+        return object()
+    monkeypatch.setattr(client.subprocess, "Popen", fake_popen)
+    client.start_ai_login()
+    assert seen["cmd"][1:] == ["auth", "login"]
+    # must NOT be hidden — the friend has to see the sign-in window
+    assert seen["flags"] == client._CREATE_NEW_CONSOLE
+
+
+def test_start_ai_login_no_binary_raises(monkeypatch):
+    monkeypatch.setattr(client, "_claude_for_auth", lambda: None)
+    with pytest.raises(client.AIUnavailable):
+        client.start_ai_login()
+
+
 def test_ask_claude_falls_back_to_cli(monkeypatch):
     monkeypatch.setattr(client, "_via_sdk",
                         lambda *a: (_ for _ in ()).throw(ImportError()))

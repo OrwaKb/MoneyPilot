@@ -234,6 +234,20 @@ class Api:
             return advisor.apply_action(self.conn, action, self._today())
 
     @_safe
+    def ai_status(self):
+        """Whether the AI is connected on THIS machine (desktop only). The web
+        build always uses the host's login, so its UI never asks."""
+        from app.ai import client
+        return client.ai_auth_status()
+
+    @_safe
+    def connect_ai(self):
+        """Open the Claude sign-in flow so a friend can enable AI on their PC."""
+        from app.ai import client
+        client.start_ai_login()
+        return {}
+
+    @_safe
     def get_chat_history(self, conversation_id=None):
         return {"messages": [dict(c)
                              for c in db.recent_chat(self.conn, 50,

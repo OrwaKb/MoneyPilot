@@ -13,3 +13,8 @@ exports/
 # web build — never commit credentials or per-user ledgers
 users/
 web/secret.key
+
+# packaged-app build artifacts (the .exe bundle is ~300MB)
+build/
+dist/
+build_log.txt
