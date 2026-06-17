@@ -101,3 +101,5 @@ def test_options_preflight_sets_cors(server):
     assert code == 204
     assert headers.get("Access-Control-Allow-Origin") == "*"
     assert "authorization" in headers.get("Access-Control-Allow-Headers", "").lower()
+    # Private Network Access opt-in (Tailscale IPs are private; the PWA is public)
+    assert headers.get("Access-Control-Allow-Private-Network") == "true"

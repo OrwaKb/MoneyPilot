@@ -31,6 +31,11 @@ def _make_handler(api, token):
             self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
             self.send_header("Access-Control-Allow-Headers",
                              "authorization, content-type")
+            # Tailscale IPs (100.64.0.0/10) are a PRIVATE range. Chrome's Private
+            # Network Access blocks a public origin (github.io) from reaching a
+            # private address unless the server opts in with this header — without
+            # it the phone's fetch fails with a bare "Failed to fetch".
+            self.send_header("Access-Control-Allow-Private-Network", "true")
 
         def _json(self, code, obj):
             body = json.dumps(obj).encode("utf-8")
