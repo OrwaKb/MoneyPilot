@@ -118,6 +118,7 @@ async function addEntry(rawText) {
 }
 
 let syncing = false;
+let lastSyncError = "";
 async function sync() {
   if (syncing) return;
   if (!cfg.url || !navigator.onLine) { return; }
@@ -137,11 +138,13 @@ async function sync() {
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
+    lastSyncError = "";
     await markSynced(data.synced || []);
     await render();
     if ((data.synced || []).length) toast("Synced to home ✓");
   } catch (err) {
     // offline / PC asleep / not paired yet — entries stay queued, try again later
+    lastSyncError = (err && err.message) ? err.message : String(err);
   } finally {
     syncing = false;
   }
@@ -161,6 +164,20 @@ $("list").addEventListener("click", async (e) => {
   if (!uuid) return;
   await delEntry(uuid);
   await render();
+});
+
+// Tap the status badge = "sync now, and tell me exactly what happened".
+$("sync-badge").addEventListener("click", async () => {
+  if (!cfg.url) {
+    toast("Not paired — open the pairing link from the desktop (Settings → PHONE).");
+    return;
+  }
+  toast("Syncing… (" + cfg.url + ")");
+  lastSyncError = "";
+  await sync();
+  const waiting = (await allEntries()).filter((e) => !e.synced).length;
+  toast(waiting === 0 ? "All synced ✓"
+    : "Still " + waiting + " waiting" + (lastSyncError ? " — " + lastSyncError : " (no response)"));
 });
 
 $("open-settings").addEventListener("click", () => {
