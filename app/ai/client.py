@@ -28,8 +28,14 @@ def _via_sdk(prompt: str, system, timeout_s: int) -> str:
     from claude_agent_sdk import ClaudeAgentOptions, query
 
     async def _run():
-        opts = ClaudeAgentOptions(system_prompt=system, max_turns=1,
-                                  allowed_tools=[])
+        # tools=[] makes the CLI receive `--tools ""` — an EMPTY base toolset.
+        # This is load-bearing: the advisor answers from FACTS + general
+        # knowledge only, and with max_turns=1 any tool call is fatal (on an
+        # internet-ish question the model spends its single turn on a WebSearch
+        # call and the SDK returns error_max_turns instead of an answer).
+        # allowed_tools=[] does NOT achieve this: an empty allow-list is falsy,
+        # so the SDK omits --allowedTools and every default tool stays available.
+        opts = ClaudeAgentOptions(system_prompt=system, max_turns=1, tools=[])
         result = None
         with anyio.move_on_after(timeout_s):
             async for message in query(prompt=prompt, options=opts):
@@ -51,7 +57,11 @@ def _via_cli(prompt: str, system, timeout_s: int) -> str:
     exe = shutil.which("claude")
     if not exe:
         raise AIUnavailable("claude CLI not found on PATH")
-    cmd = [exe, "-p", "--output-format", "json", "--max-turns", "1"]
+    # --tools "" gives an empty base toolset (mirrors _via_sdk): the fallback
+    # must also stay tool-free, or an internet-ish question burns its one turn on
+    # a WebSearch call and exits non-zero / empty -> a needless "Advisor offline".
+    cmd = [exe, "-p", "--output-format", "json", "--max-turns", "1",
+           "--tools", ""]
     if system:
         cmd += ["--append-system-prompt", system]
     try:
