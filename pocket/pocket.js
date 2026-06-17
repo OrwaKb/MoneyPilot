@@ -126,9 +126,12 @@ async function sync() {
   if (!pending.length) return;
   syncing = true;
   try {
-    const res = await fetch(cfg.url.replace(/\/$/, "") + "/pocket/sync", {
+    // A CORS "simple request" — token in the query, default text/plain body, no
+    // custom headers — so the browser sends it directly with NO preflight
+    // (preflights fail on some phone/Tailscale paths). The server JSON-parses it.
+    const url = cfg.url.replace(/\/$/, "") + "/pocket/sync?t=" + encodeURIComponent(cfg.token);
+    const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + cfg.token },
       body: JSON.stringify({
         entries: pending.map((e) => ({
           uuid: e.uuid, raw_text: e.raw_text,

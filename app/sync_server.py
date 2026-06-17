@@ -12,6 +12,7 @@ import json
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from app import pocket
 
@@ -54,11 +55,16 @@ def _make_handler(api, token):
                 self._json(404, {"error": "not found"})
 
         def do_POST(self):
-            if self.path.rstrip("/") != "/pocket/sync":
+            parts = urlparse(self.path)
+            if parts.path.rstrip("/") != "/pocket/sync":
                 self._json(404, {"error": "not found"})
                 return
+            # Token from the Authorization header OR a ?t= query param. The query
+            # form lets the phone send a CORS "simple request" (no preflight),
+            # which some phone/proxy network paths handle when a preflight fails.
             auth = self.headers.get("Authorization", "")
-            sent = auth[7:] if auth.startswith("Bearer ") else ""
+            sent = (auth[7:] if auth.startswith("Bearer ") else "") \
+                or (parse_qs(parts.query).get("t", [""])[0])
             if not (sent and hmac.compare_digest(sent, token)):
                 self._json(401, {"error": "unauthorized"})
                 return

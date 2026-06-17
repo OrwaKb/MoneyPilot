@@ -46,6 +46,29 @@ def test_sync_ingests_with_valid_token(server):
     assert len(db.list_transactions(server["api"].conn)) == 1
 
 
+def test_sync_accepts_query_token_no_auth_header(server):
+    # the phone's no-preflight "simple request" puts the token in ?t= with no
+    # Authorization header; the server must accept it.
+    port, tok = server["port"], server["token"]
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/pocket/sync?t={tok}",
+        data=json.dumps({"entries": []}).encode(), method="POST")
+    with urllib.request.urlopen(req, timeout=5) as r:
+        assert r.status == 200 and json.loads(r.read())["synced"] == []
+
+
+def test_sync_rejects_bad_query_token(server):
+    port = server["port"]
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{port}/pocket/sync?t=wrong",
+        data=b'{"entries":[]}', method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=5); code = 200
+    except urllib.error.HTTPError as e:
+        code = e.code
+    assert code == 401
+
+
 def test_sync_rejects_bad_token(server):
     code, _, _ = _req(server["port"], body={"entries": []}, token="wrong")
     assert code == 401

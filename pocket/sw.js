@@ -1,6 +1,6 @@
 /* MoneyPilot Pocket service worker — caches the app shell so the phone can open
  * and log with no signal. Bump CACHE on any shell change to refresh clients. */
-const CACHE = "mp-pocket-v2";
+const CACHE = "mp-pocket-v3";
 const SHELL = [
   "./", "./index.html", "./pocket.css", "./pocket.js",
   "./manifest.webmanifest",
