@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 DEFAULT_CATEGORIES = [
     # (name, emoji, is_income, is_fixed)
@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS transactions(
   goal_id INTEGER REFERENCES goals(id), raw_text TEXT,
   source TEXT NOT NULL DEFAULT 'manual', ai_confidence REAL,
   needs_review INTEGER NOT NULL DEFAULT 0, deleted_at TEXT,
+  client_uuid TEXT,
   CHECK((direction='income' AND amount_agorot>0)
         OR (direction!='income' AND amount_agorot<0)));
 CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(effective_date);
@@ -88,6 +89,13 @@ def init_db(conn: sqlite3.Connection) -> None:
                  (str(SCHEMA_VERSION),))
     conn.commit()
     _migrate(conn)
+    # The client_uuid index lives HERE, not in _SCHEMA: by now the column is
+    # guaranteed to exist (fresh DBs get it from _SCHEMA's CREATE; upgraded DBs
+    # get it from _migrate's ALTER), so this also works for legacy transactions
+    # tables that predate the column. Partial → many NULLs, unique non-NULLs.
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_txn_client_uuid"
+                 " ON transactions(client_uuid) WHERE client_uuid IS NOT NULL")
+    conn.commit()
 
 
 def _adopt_orphan_chats(conn) -> None:
@@ -125,6 +133,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         _adopt_orphan_chats(conn)
         conn.execute("UPDATE meta SET value='2' WHERE key='schema_version'")
         conn.commit()
+    if version < 3:
+        # Pocket (phone) sync dedupe key. The CREATE in _SCHEMA only adds it for
+        # brand-new DBs; add it (and its partial-unique index) on legacy files.
+        cols = {r["name"] for r in conn.execute(
+            "PRAGMA table_info(transactions)")}
+        if "client_uuid" not in cols:
+            conn.execute("ALTER TABLE transactions ADD COLUMN client_uuid TEXT")
+        # (the index is created in init_db after _migrate, once the column exists)
+        conn.execute("UPDATE meta SET value='3' WHERE key='schema_version'")
+        conn.commit()
 
 
 # --- settings -------------------------------------------------------------
@@ -158,7 +176,7 @@ def category_id_by_name(conn, name):
 _TXN_FIELDS = {"effective_date", "amount_agorot", "direction", "currency_orig",
                "amount_orig", "fx_rate", "category_id", "description", "merchant",
                "people", "payment_method", "goal_id", "raw_text", "source",
-               "ai_confidence", "needs_review"}
+               "ai_confidence", "needs_review", "client_uuid"}
 
 
 def _iso(v):

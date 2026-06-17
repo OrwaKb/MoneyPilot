@@ -731,6 +731,28 @@ async function renderSettings() {
         <input class="set-input set-budget" type="number" min="1" step="1"
                inputmode="numeric" value="${esc(val)}" placeholder="—"></label>`;
     }).join("");
+  renderPocketSetup();
+}
+
+/* Pocket pairing card (desktop only — the web build has no phone-sync need). */
+async function renderPocketSetup() {
+  const panel = $("#set-pocket-panel");
+  if (!panel) return;
+  if (WEB) { panel.style.display = "none"; return; }
+  const r = await api("pocket_info");
+  if (!r.ok) { $("#set-pocket").textContent = "Phone sync unavailable."; return; }
+  const link = r.pair_link
+    ? `<p>1. On your phone, open this link once (it pairs automatically):</p>
+       <p><a href="${esc(r.pair_link)}" target="_blank" class="pocket-link">${esc(r.pair_link)}</a></p>`
+    : `<p>To enable phone sync, set up Tailscale on this PC and your phone, then
+        run <code>scripts\\pocket-serve.ps1</code> (see the README). Then reopen
+        this tab to get a one-tap pairing link.</p>`;
+  $("#set-pocket").innerHTML = `
+    <p>Log spending from your phone; it syncs here while this app is open.</p>
+    ${link}
+    <p>2. Open <b>${esc(r.page)}</b> on the phone and “Add to Home Screen”.</p>
+    <p class="pocket-token">Pairing token (if entering manually): <code>${esc(r.token)}</code>
+       ${r.url ? `· Home address: <code>${esc(r.url)}</code>` : ""}</p>`;
 }
 
 $('[data-tab="settings"]').addEventListener("click", renderSettings);

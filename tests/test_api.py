@@ -33,6 +33,25 @@ def test_startup_reports_version(api):
     assert api.startup()["version"] == version.__version__
 
 
+def test_pocket_info_exposes_pairing(api, monkeypatch):
+    from app import pocket
+    monkeypatch.setattr(pocket, "tailscale_url", lambda: "https://pc.tail.ts.net")
+    out = api.pocket_info()
+    assert out["ok"] is True
+    assert out["page"].endswith("/pocket/") and "github.io" in out["page"]
+    assert out["token"] and out["url"] == "https://pc.tail.ts.net"
+    assert out["pair_link"].startswith(out["page"] + "#")
+    assert "token=" in out["pair_link"] and "url=" in out["pair_link"]
+
+
+def test_pocket_info_no_tailscale_no_link(api, monkeypatch):
+    from app import pocket
+    monkeypatch.setattr(pocket, "tailscale_url", lambda: None)
+    out = api.pocket_info()
+    assert out["ok"] is True and out["url"] is None and out["pair_link"] is None
+    assert out["token"]  # token still available for manual pairing
+
+
 def test_check_update_bridges(api, monkeypatch):
     from app import update
     monkeypatch.setattr(update, "check_for_update",

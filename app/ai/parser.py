@@ -158,7 +158,8 @@ def _ai_parse(conn, text: str, today: dt.date) -> list[ParsedTxn]:
     raise client.AIUnavailable("unreachable")  # pragma: no cover
 
 
-def _store(conn, p: ParsedTxn, *, raw_text: str, source: str) -> int:
+def _store(conn, p: ParsedTxn, *, raw_text: str, source: str,
+           client_uuid: str | None = None) -> int:
     try:
         rates = fx.get_rates(conn, p.effective_date) if p.currency != "ILS" else {}
         agorot, rate = fx.to_ils(p.amount, p.currency, rates)
@@ -195,7 +196,8 @@ def _store(conn, p: ParsedTxn, *, raw_text: str, source: str) -> int:
         fx_rate=rate, category_id=cat_id, description=p.description,
         merchant=p.merchant, people=p.people, payment_method=p.payment_method,
         goal_id=goal_id, raw_text=raw_text, source=source,
-        ai_confidence=p.confidence, needs_review=needs_review)
+        ai_confidence=p.confidence, needs_review=needs_review,
+        client_uuid=client_uuid)
 
 
 def parse_and_store(conn, text: str, today: dt.date) -> dict:

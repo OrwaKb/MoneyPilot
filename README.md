@@ -69,6 +69,30 @@ Each release:
    the in-app banner next launch; it links to the release page so they grab the
    installer.
 
+## Use it on your phone (MoneyPilot Pocket)
+
+Log spending from your phone on the go; it syncs into this same ledger when
+you're home and the desktop app is open. No always-on server, no cloud — data
+stays on your devices. The phone is capture-only (budgets/allowance/AI stay here).
+
+How it fits together: the phone runs a tiny capture PWA (`pocket/`, hosted on
+GitHub Pages) that queues entries offline in the browser; the desktop app runs a
+localhost sync listener (`app/sync_server.py`, port 8788) only while it's open;
+your private Tailscale network carries phone → desktop over HTTPS.
+
+One-time setup:
+1. Install **Tailscale** on this PC and your phone, sign into the same account on
+   both, and enable **HTTPS certificates** in the Tailscale admin console.
+2. `powershell -ExecutionPolicy Bypass -File scripts\pocket-serve.ps1`
+   (forwards your tailnet HTTPS → the localhost listener).
+3. Open the desktop app → **Settings → PHONE**, and on your phone open the
+   one-tap **pairing link** shown there. Then open the Pocket page
+   (`https://<you>.github.io/MoneyPilot/pocket/`) and **Add to Home Screen**.
+
+After that: tap the Pocket icon, log an expense (works offline), and it lands in
+your ledger next time you're home with the app open. Entries dedupe by a
+client id, so re-syncs never double-count.
+
 ## Share with a friend (web)
 
 Run MoneyPilot from your PC so a friend can log in from a browser. Data stays

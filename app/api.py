@@ -268,6 +268,22 @@ class Api:
         return {}
 
     @_safe
+    def pocket_info(self):
+        """Pairing info for the phone capture app (desktop only): the GitHub
+        Pages URL, the pairing token, this PC's Tailscale URL (best-effort), and
+        a one-tap pairing link that pre-fills both on the phone."""
+        from urllib.parse import urlencode
+        from app import pocket, sync_server, version
+        owner, _, repo = (version.GITHUB_REPO or "/").partition("/")
+        page = f"https://{owner.lower()}.github.io/{repo}/pocket/"
+        token = pocket.get_token(self.conn)
+        url = pocket.tailscale_url()
+        pair_link = (page + "#" + urlencode({"url": url, "token": token})
+                     if url else None)
+        return {"page": page, "token": token, "url": url,
+                "pair_link": pair_link, "port": sync_server.DEFAULT_PORT}
+
+    @_safe
     def get_chat_history(self, conversation_id=None):
         return {"messages": [dict(c)
                              for c in db.recent_chat(self.conn, 50,

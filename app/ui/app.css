@@ -501,3 +501,10 @@ td input, td select { background: var(--bg); color: var(--txt);
 }
 .btn.ghost:hover { opacity: 1; }
 .set-version { opacity: .6; margin-right: auto; }
+
+/* --- Pocket (phone) pairing card in Settings ------------------------------- */
+#set-pocket p { margin: 6px 0; line-height: 1.5; }
+#set-pocket code { background: rgba(45,168,255,.12); color: var(--blue);
+  padding: 1px 6px; border-radius: 5px; word-break: break-all; }
+.pocket-link { color: var(--accent); word-break: break-all; }
+.pocket-token { color: var(--muted); font-size: 12px; }

@@ -44,18 +44,38 @@ def test_migration_v1_to_v2(tmp_path):
     assert len(rows) == 2
     assert all(r["conversation_id"] == cid for r in rows)
 
-    # version bumped
+    # version bumped to current (v1 → v2 → v3 all ran)
     v = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-    assert v["value"] == "2"
+    assert v["value"] == "3"
     c.close()
 
 
-def test_fresh_db_is_v2_no_legacy_conversation(conn):
+def test_fresh_db_is_current_no_legacy_conversation(conn):
     v = conn.execute(
         "SELECT value FROM meta WHERE key='schema_version'").fetchone()
-    assert v["value"] == "2"
+    assert v["value"] == "3"
     # no chats existed → migration created no conversation
     assert list(conn.execute("SELECT * FROM conversations")) == []
+
+
+def test_migration_v2_to_v3_adds_client_uuid(tmp_path):
+    """A v2 DB whose transactions table predates the Pocket dedupe key gets the
+    client_uuid column + its partial-unique index added, version bumped to 3."""
+    c = db.connect(tmp_path / "v2.db")
+    c.executescript(_V1_SCHEMA)  # meta + chat_history
+    c.execute("ALTER TABLE chat_history ADD COLUMN conversation_id INTEGER")
+    c.execute("CREATE TABLE transactions(id INTEGER PRIMARY KEY, created_at TEXT,"
+              " effective_date TEXT, amount_agorot INTEGER, direction TEXT)")
+    c.execute("INSERT INTO meta(key, value) VALUES('schema_version', '2')")
+    c.commit()
+    db.init_db(c)
+    tcols = {r["name"] for r in c.execute("PRAGMA table_info(transactions)")}
+    assert "client_uuid" in tcols
+    idx = {r["name"] for r in c.execute("PRAGMA index_list(transactions)")}
+    assert "idx_txn_client_uuid" in idx
+    v = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+    assert v["value"] == "3"
+    c.close()
 
 
 def test_migration_idempotent(tmp_path):
@@ -78,7 +98,7 @@ def test_migration_no_chats_no_conversation(tmp_path):
     assert "conversation_id" in cols
     assert list(c.execute("SELECT * FROM conversations")) == []
     v = c.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
-    assert v["value"] == "2"
+    assert v["value"] == "3"
     c.close()
 
 

@@ -183,4 +183,17 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
+/* One-tap pairing: the desktop "Pocket setup" link carries #url=…&token=… —
+ * pick it up, store it, and scrub the hash so the secret isn't left in the URL. */
+(function autoPair() {
+  if (!location.hash) return;
+  const p = new URLSearchParams(location.hash.slice(1));
+  const url = p.get("url"), token = p.get("token");
+  if (url && token) {
+    cfg.set(url, token);
+    history.replaceState(null, "", location.pathname + location.search);
+    toast("Paired with home ✓");
+  }
+})();
+
 render().then(sync);

@@ -189,6 +189,16 @@ def main() -> None:
     api = Api(db_path, backup_dir=backup_dir)
     _serve_singleton(ddir, api)
 
+    # Phone (Pocket) sync listener — bound to localhost, alive only while this
+    # window is open. `tailscale serve` is what exposes it to the user's tailnet.
+    sync_httpd = None
+    try:
+        from app import pocket, sync_server
+        sync_httpd = sync_server.start(api, pocket.get_token(api.conn))
+    except OSError as e:  # port busy / unavailable — phone sync just won't work
+        logging.getLogger("moneypilot.sync").warning(
+            "Pocket sync listener not started: %s", e)
+
     s = db.get_settings(api.conn)
 
     def _geo(key, default):
@@ -216,6 +226,8 @@ def main() -> None:
 
     window.events.closing += _save_geometry
     webview.start(debug=args.dev)
+    if sync_httpd:
+        sync_httpd.shutdown()
     (ddir / SINGLETON_PORT_FILE).unlink(missing_ok=True)
 
 

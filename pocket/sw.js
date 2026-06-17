@@ -20,10 +20,15 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
-  // Never cache sync POSTs to the home desktop — they must hit the network.
-  if (req.method !== "GET" || req.url.includes("/pocket/sync")) return;
-  // App shell: cache-first (works offline); fall back to network for the rest.
+  // Never touch sync POSTs to the home desktop — they must hit the network.
+  if (req.method !== "GET" || req.url.includes("/pocket/")) return;
+  // Network-FIRST so app updates land immediately for returning users; cache the
+  // fresh copy and fall back to it (then index.html) only when offline.
   e.respondWith(
-    caches.match(req).then((hit) => hit || fetch(req).catch(() => caches.match("./index.html")))
+    fetch(req).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+      return res;
+    }).catch(() => caches.match(req).then((hit) => hit || caches.match("./index.html")))
   );
 });
