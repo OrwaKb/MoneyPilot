@@ -491,3 +491,11 @@ def test_apply_action_adjust_setting_missing_key_clean_error(seeded):
         advisor.apply_action(seeded, {"type": "adjust_setting",
                                       "value": "7"}, TODAY)
     assert "'key'" not in str(ei.value)  # no raw KeyError('key')
+
+
+def test_briefing_can_mention_recurring(seeded, monkeypatch):
+    # Prove the prompts now carry recurring guidance (so the model is allowed to
+    # mention an imminent charge / the monthly burn). FACTS-only is unchanged.
+    from app.ai import prompts
+    assert "recurring" in prompts.BRIEFING_SYSTEM.lower()
+    assert "recurring" in prompts.CHAT_SYSTEM.lower()

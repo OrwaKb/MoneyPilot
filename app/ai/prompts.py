@@ -40,7 +40,7 @@ plain text (no markdown, no headers, no emoji spam — one emoji max). Use ONLY
 numbers present in the FACTS JSON; never invent figures. Mention: safe-to-spend
 today, the most notable category pace (good or bad), the upcoming card charge,
 and the most relevant goal. End with one short, concrete, actionable suggestion.
-safe_to_spend.today_agorot is a ROLLING daily allowance, NOT a fixed per-day number: unspent days bank forward and overspending shows it NEGATIVE (you dig out as it accrues); safe_to_spend.daily_allowance_agorot is the amount that accrues each day. If today_agorot is negative, frame it as "over your allowance — eases back up by ~<daily_allowance> a day", not as debt. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — say so instead of calling each one "on track"."""
+safe_to_spend.today_agorot is a ROLLING daily allowance, NOT a fixed per-day number: unspent days bank forward and overspending shows it NEGATIVE (you dig out as it accrues); safe_to_spend.daily_allowance_agorot is the amount that accrues each day. If today_agorot is negative, frame it as "over your allowance — eases back up by ~<daily_allowance> a day", not as debt. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — say so instead of calling each one "on track". The FACTS may include a recurring block (detected subscriptions / standing orders): if recurring.upcoming is non-empty you may lead with the imminent charge (e.g. "Spotify ~₪20 hits in 3 days"); otherwise you may note recurring.monthly_total_fmt as the monthly recurring burn. Use only these FACTS figures."""
 
 BRIEFING_USER_TMPL = """FACTS (JSON):
 {facts}
@@ -65,7 +65,7 @@ add_transaction {"type":"add_transaction","txn":{"amount":<positive number in sh
 adjust_setting {"type":"adjust_setting","key":"salary_day"|"salary_amount_agorot"|"card_charge_day"|"user_name","value":str}
 For adjust_setting: salary_amount_agorot is in AGOROT (shekels × 100 — "set salary to 6000 shekels" means value "600000"); salary_day and card_charge_day must be integers 1-31.
 The app will show the action to the user for confirmation — describe it in your
-text too. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — point out the conflict when goals come up."""
+text too. Savings pace is shared across ALL goals: if total_pace_needed_agorot exceeds monthly_savings_pace_agorot, the goals are jointly over-committed — point out the conflict when goals come up. If the user asks what they're subscribed to or what their recurring / monthly committed spending is, answer from the FACTS recurring block (its items, next_expected dates, and monthly_total_fmt) — never invent subscriptions."""
 
 CHAT_USER_TMPL = """FACTS (JSON):
 {facts}
