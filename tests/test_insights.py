@@ -98,3 +98,17 @@ def test_recent_transactions_minimal_fields(seeded):
     (row,) = insights.fact_pack(seeded, TODAY)["recent_transactions"]
     assert set(row) == {"date", "amount_fmt", "category", "description",
                         "direction"}  # merchant/people/raw_text must NOT leak
+
+
+def test_fact_pack_includes_recurring(conn):
+    import datetime as dt
+    from app import db
+    from app.engine import insights
+    for d in ("2026-03-21", "2026-04-20", "2026-05-20"):
+        db.add_transaction(conn, effective_date=d, amount_agorot=-4500,
+                           direction="expense", merchant="Netflix",
+                           description="netflix")
+    fp = insights.fact_pack(conn, dt.date(2026, 6, 20))
+    assert fp["recurring"]["count"] == 1
+    assert fp["recurring"]["monthly_total_fmt"].startswith("₪")
+    assert fp["recurring"]["items"][0]["name"] == "Netflix"

@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 from app import db
-from app.engine import budget, cycles, goals
+from app.engine import budget, cycles, goals, recurring
 from app.models import fmt_ils
 
 
@@ -27,6 +27,8 @@ def fact_pack(conn, today: dt.date) -> dict:
 
     prev = cycles.salary_cycle(cyc["start"] - dt.timedelta(days=1), salary_day)
     prev_income, prev_expenses = budget.cycle_net(conn, prev["start"], prev["end"])
+
+    rec = recurring.summary(conn, today)
 
     return {
         "user_name": db.get_setting(conn, "user_name", ""),
@@ -64,6 +66,20 @@ def fact_pack(conn, today: dt.date) -> dict:
                     "total_agorot": available + earmarked,
                     "total_fmt": fmt_ils(available + earmarked)},
         "goals": [_iso_dict(g) for g in report],
+        "recurring": {
+            "monthly_total_agorot": rec["monthly_total_agorot"],
+            "monthly_total_fmt": fmt_ils(rec["monthly_total_agorot"]),
+            "count": len(rec["items"]),
+            "items": [{"name": i["name"], "cadence": i["cadence"],
+                       "typical_fmt": fmt_ils(i["typical_agorot"]),
+                       "next_expected": i["next_expected"],
+                       "monthly_equiv_fmt": fmt_ils(i["monthly_equiv_agorot"])}
+                      for i in rec["items"][:5]],
+            "upcoming": [{"name": i["name"],
+                          "typical_fmt": fmt_ils(i["typical_agorot"]),
+                          "next_expected": i["next_expected"]}
+                         for i in rec["upcoming"]],
+        },
         "monthly_savings_pace_agorot": goals.monthly_savings_pace(conn, today),
         "total_pace_needed_agorot": total_pace_needed,
         "last_cycle": {"income_agorot": prev_income,
