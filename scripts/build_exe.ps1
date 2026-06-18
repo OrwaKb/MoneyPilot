@@ -5,6 +5,16 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $py = "$root\.venv\Scripts\python.exe"
 
+# Gate 1 (fail fast, before the slow build): never ship a red suite. MoneyPilot
+# self-updates a friend on an unsigned build, so a regression here reaches them
+# automatically. $LASTEXITCODE is checked explicitly — $ErrorActionPreference
+# does not trip on a native exe's non-zero exit.
+Write-Host "Gate: running the test suite (pytest)..." -ForegroundColor Cyan
+& $py -m pytest -q
+if ($LASTEXITCODE -ne 0) {
+    throw "Aborting build: test suite failed (exit $LASTEXITCODE). Fix the tests before shipping."
+}
+
 Write-Host "Ensuring PyInstaller is installed..." -ForegroundColor Cyan
 & $py -m pip install --quiet "pyinstaller>=6.0"
 
@@ -19,6 +29,16 @@ Pop-Location
 $appDir = "$root\dist\MoneyPilot"
 if (-not (Test-Path "$appDir\MoneyPilot.exe")) {
     throw "Build failed: MoneyPilot.exe not found in $appDir"
+}
+
+# Gate 2 (before zipping/installer): prove the FROZEN bundle actually resolves
+# its UI, icon, writable data dir, and Claude runtime. A green pytest can still
+# pair with a broken bundle (missing collected data); --selftest is what catches
+# that, so a broken zip can't be published to a friend.
+Write-Host "Gate: headless --selftest on the built exe..." -ForegroundColor Cyan
+& "$appDir\MoneyPilot.exe" --selftest
+if ($LASTEXITCODE -ne 0) {
+    throw "Aborting build: MoneyPilot.exe --selftest failed (exit $LASTEXITCODE). The bundle is broken; not shipping."
 }
 
 # Bundle the friend Read-me into the folder, then zip the whole thing.

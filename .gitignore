@@ -18,3 +18,6 @@ web/secret.key
 build/
 dist/
 build_log.txt
+
+# stray screenshots dropped at the repo root (e.g. a friend's bug report)
+/image.png
