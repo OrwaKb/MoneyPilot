@@ -335,6 +335,8 @@ renderers.overview = async function renderOverview() {
     briefingText = b.ok ? b.text : null;
   }
   $("#ov-briefing").textContent = briefingText ?? "briefing unavailable";
+
+  renderRecurring();   // populates its own panel; don't block the hero/dial paint
 };
 
 $("#ov-brief-refresh").addEventListener("click", async () => {
@@ -345,6 +347,36 @@ $("#ov-brief-refresh").addEventListener("click", async () => {
   briefingText = b.ok ? b.text : null;
   $("#ov-briefing").textContent = briefingText ?? "briefing unavailable";
 });
+
+async function renderRecurring() {
+  const res = await api("get_recurring");
+  const box = $("#ov-recurring");
+  if (!res || res.ok === false) { box.innerHTML = ""; return; }
+  $("#ov-rec-total").textContent =
+    res.items.length ? `${res.monthly_total_fmt}/mo` : "";
+  if (!res.items.length) {
+    box.innerHTML = `<span class="sub">No recurring charges detected yet — `
+      + `they'll appear as your history builds.</span>`;
+    return;
+  }
+  box.innerHTML = res.items.map((i) => `
+    <div class="rec-row">
+      <div class="meta">
+        <span>${esc(i.name)}${i.price_hike ? ' <span class="rec-hike">↑</span>' : ""}</span>
+        <span>${esc(i.typical_fmt)} · ${esc(i.cadence)}</span>
+      </div>
+      <div class="rec-sub">
+        <span class="sub">next ${esc(i.next_expected)}</span>
+        <button class="rec-x" data-key="${esc(i.key)}" title="not a subscription">×</button>
+      </div>
+    </div>`).join("");
+  box.querySelectorAll(".rec-x").forEach((btn) => {
+    btn.onclick = async () => {
+      await api("dismiss_recurring", btn.dataset.key);
+      renderRecurring();
+    };
+  });
+}
 
 /* --- LEDGER ---------------------------------------------------------------- */
 let lgCategories = [];

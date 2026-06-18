@@ -508,3 +508,14 @@ td input, td select { background: var(--bg); color: var(--txt);
   padding: 1px 6px; border-radius: 5px; word-break: break-all; }
 .pocket-link { color: var(--accent); word-break: break-all; }
 .pocket-token { color: var(--muted); font-size: 12px; }
+
+/* --- Overview RECURRING card --------------------------------------------- */
+.rec-total { float: right; color: var(--accent); font-weight: 600; }
+.rec-row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rec-row:last-child { border-bottom: 0; }
+.rec-row .meta { display: flex; justify-content: space-between; gap: 8px; }
+.rec-sub { display: flex; justify-content: space-between; align-items: center; }
+.rec-hike { color: var(--amber); }
+.rec-x { background: none; border: 0; color: var(--dim); cursor: pointer;
+         font-size: 15px; line-height: 1; padding: 0 4px; }
+.rec-x:hover { color: var(--red); }
