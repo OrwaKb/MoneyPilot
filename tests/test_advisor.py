@@ -68,6 +68,20 @@ def test_chat_extracts_action_block(seeded, monkeypatch):
     assert r["action"]["type"] == "create_goal"
     assert "```" not in r["text"]
 
+def test_chat_surfaces_unparseable_action_block(seeded, monkeypatch):
+    # The model promised an action but emitted malformed JSON in the fence.
+    # Old behavior: action stayed None and the fence was stripped, leaving the
+    # user with prose promising a change, no card, and no clue nothing happened.
+    # Now the dead-end must be surfaced as a short note (prose still preserved).
+    reply = 'Done — budget updated!\n```action\n{oops not valid json}\n```'
+    monkeypatch.setattr(advisor.client, "ask_claude", lambda *a, **k: reply)
+    r = advisor.chat(seeded, "set my Fun budget to 100", TODAY)
+    assert r["action"] is None
+    assert "```" not in r["text"]                  # fence still stripped
+    assert "Done — budget updated!" in r["text"]   # original prose preserved
+    assert "couldn't" in r["text"].lower()         # the dead-end is now visible
+
+
 def test_chat_offline(seeded, monkeypatch):
     monkeypatch.setattr(advisor.client, "ask_claude",
                         lambda *a, **k: (_ for _ in ()).throw(

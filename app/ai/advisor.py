@@ -84,9 +84,11 @@ def chat(conn, text: str, today: dt.date, conversation_id=None) -> dict:
                 "action": None, "offline": True,
                 "conversation_id": conversation_id, "title": title}
     action = None
+    saw_action_block = False
     while "```action" in reply:
         head, _, tail = reply.partition("```action")
         block, _, rest = tail.partition("```")
+        saw_action_block = True
         if action is None:
             try:
                 action = client.extract_json(block, opener="{")
@@ -94,6 +96,13 @@ def chat(conn, text: str, today: dt.date, conversation_id=None) -> dict:
                 action = None
         reply = (head + rest).strip()
     reply = reply.strip()
+    if saw_action_block and action is None:
+        # The model wrapped an action it then couldn't render as valid JSON.
+        # Don't leave a silent dead-end (prose promises a change, no card, nothing
+        # happens) — surface it so the user knows to rephrase.
+        note = ("I couldn't read the action I tried to prepare — could you"
+                " rephrase what you'd like me to do?")
+        reply = (reply + "\n\n" + note).strip() if reply else note
     db.add_chat(conn, "assistant", reply, conversation_id=conversation_id)
     return {"text": reply, "action": action, "offline": False,
             "conversation_id": conversation_id, "title": title}
