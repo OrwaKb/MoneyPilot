@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app import db
 from app.ai import advisor, parser
-from app.engine import budget, goals as goals_eng, insights
+from app.engine import budget, goals as goals_eng, insights, recurring
 from app.models import fmt_ils, parse_iso_date, to_agorot, to_whole_agorot
 
 ONBOARD_KEYS = ("user_name", "salary_day", "salary_amount_agorot",
@@ -232,6 +232,25 @@ class Api:
     def archive_goal(self, goal_id: int):
         with self._lock:
             db.update_goal(self.conn, goal_id, status="archived")
+        return {}
+
+    @_safe
+    def get_recurring(self):
+        s = recurring.summary(self.conn, self._today())
+
+        def _fmt(i):
+            return {**i, "typical_fmt": fmt_ils(i["typical_agorot"]),
+                    "monthly_equiv_fmt": fmt_ils(i["monthly_equiv_agorot"])}
+
+        return {"items": [_fmt(i) for i in s["items"]],
+                "upcoming": [_fmt(i) for i in s["upcoming"]],
+                "monthly_total_agorot": s["monthly_total_agorot"],
+                "monthly_total_fmt": fmt_ils(s["monthly_total_agorot"])}
+
+    @_safe
+    def dismiss_recurring(self, key: str):
+        with self._lock:
+            recurring.dismiss(self.conn, str(key))
         return {}
 
     # --- advisor -----------------------------------------------------------------

@@ -464,3 +464,21 @@ def test_startup_smoke(api, monkeypatch):
     res = api.startup()
     assert res["ok"] is True and res["onboarded"] is True
     assert list(api.backup_dir.glob("ledger-*.json"))  # backup written
+
+
+def test_get_recurring_and_dismiss(tmp_path):
+    api = Api(tmp_path / "l.db", backup_dir=tmp_path / "b",
+              today_fn=lambda: dt.date(2026, 6, 20))
+    for d in ("2026-03-21", "2026-04-20", "2026-05-20"):
+        db.add_transaction(api.conn, effective_date=d, amount_agorot=-4500,
+                           direction="expense", merchant="Netflix",
+                           description="netflix")
+    res = api.get_recurring()
+    assert res["ok"] is True
+    assert len(res["items"]) == 1
+    item = res["items"][0]
+    assert item["typical_fmt"].startswith("₪") and "monthly_equiv_fmt" in item
+    assert res["monthly_total_fmt"].startswith("₪")
+
+    assert api.dismiss_recurring(item["key"])["ok"] is True
+    assert api.get_recurring()["items"] == []

@@ -37,7 +37,8 @@ ALLOWED = {
     "startup", "get_overview", "add_entry", "undo_txn", "restore_txn",
     "update_txn", "list_ledger", "get_goals", "save_goal", "archive_goal",
     "get_briefing", "chat_send", "chat_apply_action", "get_chat_history",
-    "list_chats", "delete_chat", "get_app_settings", "save_settings",
+    "list_chats", "delete_chat", "get_recurring", "dismiss_recurring",
+    "get_app_settings", "save_settings",
     "set_category_budget", "remove_category_budget",
     "onboarding_braindump", "onboarding_complete",
 }
