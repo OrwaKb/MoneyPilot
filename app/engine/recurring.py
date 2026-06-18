@@ -127,3 +127,16 @@ def detect(conn, today: dt.date, *, lookback_days: int = 760,
         })
     out.sort(key=lambda d: d["confidence"], reverse=True)
     return out
+
+
+def summary(conn, today: dt.date, *, soon_days: int = 7) -> dict:
+    """All detections + the monthly burn (summed over ALL of them) + the subset
+    due within `soon_days`. Runs detect once so callers don't repeat the work."""
+    items = detect(conn, today)
+    horizon = (today + dt.timedelta(days=soon_days)).isoformat()
+    t = today.isoformat()
+    return {
+        "items": items,
+        "monthly_total_agorot": sum(i["monthly_equiv_agorot"] for i in items),
+        "upcoming": [i for i in items if t <= i["next_expected"] <= horizon],
+    }

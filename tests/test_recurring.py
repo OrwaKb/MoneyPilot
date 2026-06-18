@@ -81,6 +81,31 @@ def test_description_fallback_when_merchant_null(conn):
     assert "gym" in r["key"]
 
 
+def test_summary_monthly_total_sums_all_items(conn):
+    _series(conn, [dt.date(2026, 3, 21), dt.date(2026, 4, 20), dt.date(2026, 5, 20)],
+            ils=45.0, merchant="Netflix", description="netflix")
+    _series(conn, [dt.date(2026, 4, 9), dt.date(2026, 5, 9), dt.date(2026, 6, 8)],
+            ils=20.0, merchant="Spotify", description="spotify")
+    s = recurring.summary(conn, TODAY)
+    assert len(s["items"]) == 2
+    assert s["monthly_total_agorot"] == 6500     # 4500 + 2000
+
+
+def test_summary_upcoming_window(conn):
+    _series(conn, [dt.date(2026, 3, 25), dt.date(2026, 4, 24), dt.date(2026, 5, 24)],
+            merchant="Netflix", description="netflix")
+    s = recurring.summary(conn, TODAY)           # next = 2026-06-23, within 7d
+    assert [i["name"] for i in s["upcoming"]] == ["Netflix"]
+
+
+def test_summary_excludes_far_future_from_upcoming(conn):
+    _series(conn, [dt.date(2024, 6, 18), dt.date(2025, 6, 18), dt.date(2026, 6, 18)],
+            ils=240.0, merchant="DomainCo", description="domain")
+    s = recurring.summary(conn, TODAY)           # annual next ~2027 -> not upcoming
+    assert s["upcoming"] == []
+    assert len(s["items"]) == 1
+
+
 def test_stale_cancelled_subscription_excluded(conn):
     # 3 clean monthly charges that STOPPED ~8 months ago — cancelled, not active.
     # In window (lookback ~25mo) but the last charge is far older than a cycle.
