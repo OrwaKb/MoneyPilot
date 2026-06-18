@@ -26,6 +26,18 @@ def wapi(tmp_path):
     return WidgetApi(a)
 
 
+def test_widget_backs_up_under_data_dir_not_project_dir(tmp_path):
+    # Regression: the widget built its Api with backup_dir=PROJECT_DIR/"backups".
+    # PROJECT_DIR is the read-only bundle/extract dir when frozen, so a
+    # widget-first user's daily backups silently failed (write_daily_backup
+    # swallows the OSError). Both entrypoints must back up under the per-user
+    # data dir, exactly like app.__main__ (ddir/"backups").
+    import app.widget as w
+    api = w._make_api(tmp_path)
+    assert api.backup_dir == tmp_path / "backups"
+    assert api.backup_dir != w.PROJECT_DIR / "backups"
+
+
 def test_get_overview_delegates_unchanged(wapi):
     assert wapi.get_overview() == wapi._api.get_overview()
 
@@ -64,6 +76,17 @@ def test_geometry_round_trips_through_settings(wapi):
     assert db.get_setting(wapi._api.conn, "widget_x") == "111"
     assert db.get_setting(wapi._api.conn, "widget_y") == "222"
     assert db.get_setting(wapi._api.conn, "widget_on_top") == "0"
+
+
+def test_get_pin_reflects_persisted_state(wapi):
+    # The UI used to hardcode the 📌 as "on" at boot, lying when the user had
+    # previously unpinned (widget.py honors the persisted widget_on_top when it
+    # creates the window). get_pin returns the same truth so the UI can match it.
+    assert wapi.get_pin() == {"ok": True, "on": True}        # default: pinned
+    db.set_setting(wapi._api.conn, "widget_on_top", 0)
+    assert wapi.get_pin() == {"ok": True, "on": False}       # honors unpinned
+    db.set_setting(wapi._api.conn, "widget_on_top", 1)
+    assert wapi.get_pin() == {"ok": True, "on": True}
 
 
 def test_set_pin_updates_window_and_setting(wapi):
@@ -119,3 +142,69 @@ def test_second_launch_focuses_running_widget(monkeypatch, tmp_path):
 def test_no_lockfile_means_no_running_widget(tmp_path):
     import app.widget as w
     assert w._try_focus_running_widget(tmp_path) is False
+
+
+# --- always-on-top ("stay on top" 📌) GUI-thread marshaling ----------------
+# Regression: tapping the pin froze the widget. pywebview 6.2.1's
+# winforms.set_on_top flips Form.TopMost on the *calling* thread, and JS-API
+# bridge calls run on a background thread (util.js_bridge_call spawns one per
+# call) -> cross-thread WinForms access blocks on a synchronous window message
+# to the GUI thread and hangs. _install_on_top_fix marshals via Form.Invoke,
+# exactly as pywebview's own set_title/show already do.
+
+class _FakeForm:
+    def __init__(self, invoke_required):
+        self.InvokeRequired = invoke_required     # True == off the GUI thread
+        self.TopMost = None
+        self.invoked = 0
+    def Invoke(self, delegate):                   # WinForms marshal onto GUI thread
+        self.invoked += 1
+        return delegate()
+
+
+class _FakeGeneric:
+    def __getitem__(self, item):
+        return lambda fn: fn                       # CLR Func[Type](fn) -> the callable
+
+
+def _fake_gui(form):
+    import types
+    return types.SimpleNamespace(
+        BrowserView=types.SimpleNamespace(instances={"win-1": form}),
+        Func=_FakeGeneric(), Type=object)
+
+
+def test_on_top_marshals_to_gui_thread_when_off_thread():
+    from app.widget import _install_on_top_fix
+    form = _FakeForm(invoke_required=True)         # i.e. called from a bridge thread
+    gui = _fake_gui(form)
+    assert _install_on_top_fix(gui) is True
+    gui.set_on_top("win-1", True)
+    assert form.TopMost is True
+    assert form.invoked == 1                        # went through Invoke -> no freeze
+
+
+def test_on_top_sets_directly_when_already_on_gui_thread():
+    from app.widget import _install_on_top_fix
+    form = _FakeForm(invoke_required=False)
+    gui = _fake_gui(form)
+    _install_on_top_fix(gui)
+    gui.set_on_top("win-1", False)
+    assert form.TopMost is False
+    assert form.invoked == 0                        # no needless marshaling
+
+
+def test_on_top_fix_is_idempotent():
+    from app.widget import _install_on_top_fix
+    gui = _fake_gui(_FakeForm(invoke_required=True))
+    assert _install_on_top_fix(gui) is True
+    first = gui.set_on_top
+    assert _install_on_top_fix(gui) is True
+    assert gui.set_on_top is first                  # not double-wrapped
+
+
+def test_on_top_missing_form_is_noop():
+    from app.widget import _install_on_top_fix
+    gui = _fake_gui(_FakeForm(invoke_required=True))
+    _install_on_top_fix(gui)
+    gui.set_on_top("nonexistent", True)             # must not raise

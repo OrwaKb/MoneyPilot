@@ -103,8 +103,10 @@ $("#w-pin").addEventListener("click", async () => {
   await api("set_pin", pinned);
 });
 
-ready.then(() => {
-  $("#w-pin").classList.add("on");          // starts pinned
+ready.then(async () => {
+  const p = await api("get_pin");           // paint 📌 from truth, not an assumption
+  pinned = (p && p.ok) ? !!p.on : true;     // default pinned if the call failed
+  $("#w-pin").classList.toggle("on", pinned);
   refresh();
   setInterval(refresh, 30000);              // poll every 30s
   window.addEventListener("focus", refresh);
