@@ -112,3 +112,10 @@ def test_fact_pack_includes_recurring(conn):
     assert fp["recurring"]["count"] == 1
     assert fp["recurring"]["monthly_total_fmt"].startswith("₪")
     assert fp["recurring"]["items"][0]["name"] == "Netflix"
+
+
+def test_fact_pack_skips_recurring_when_disabled(conn):
+    import datetime as dt
+    from app.engine import insights
+    fp = insights.fact_pack(conn, dt.date(2026, 6, 20), include_recurring=False)
+    assert "recurring" not in fp

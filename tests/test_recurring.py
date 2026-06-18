@@ -18,15 +18,57 @@ def _series(conn, dates, ils=45.0, **kw):
 
 
 def test_detects_three_monthly_charges(conn):
-    _series(conn, [dt.date(2026, 3, 21), dt.date(2026, 4, 20), dt.date(2026, 5, 20)])
+    _series(conn, [dt.date(2026, 4, 2), dt.date(2026, 5, 2), dt.date(2026, 6, 1)])
     (r,) = recurring.detect(conn, TODAY)
     assert r["cadence"] == "monthly"
     assert r["typical_agorot"] == 4500
     assert r["monthly_equiv_agorot"] == 4500
-    assert r["last_charged"] == "2026-05-20"
-    assert r["next_expected"] == "2026-06-19"   # 2026-05-20 + 30 days
+    assert r["last_charged"] == "2026-06-01"
+    assert r["next_expected"] == "2026-07-01"   # 2026-06-01 + 30d (already future)
     assert r["occurrences"] == 3
     assert r["price_hike"] is False
+
+
+def test_next_expected_advances_past_today_for_an_overdue_series(conn):
+    # Last charge is overdue-but-within-grace (36d ago, grace = 30+7), so the
+    # series is KEPT — but next_expected must still read as a FORWARD date, not
+    # the already-passed 2026-06-14. It advances by whole cadence steps.
+    _series(conn, [dt.date(2026, 3, 16), dt.date(2026, 4, 15), dt.date(2026, 5, 15)])
+    (r,) = recurring.detect(conn, TODAY)
+    assert r["last_charged"] == "2026-05-15"
+    assert r["next_expected"] >= TODAY.isoformat()
+    assert r["next_expected"] == "2026-07-14"   # 05-15 + 2×30d
+
+
+def test_social_spend_with_people_not_recurring(conn):
+    # Monthly coffees tagged with `people` are social, not a subscription.
+    for d in [dt.date(2026, 4, 2), dt.date(2026, 5, 2), dt.date(2026, 6, 1)]:
+        db.add_transaction(conn, effective_date=d, amount_agorot=-1200,
+                           direction="expense", merchant=None,
+                           description="coffee", people="sarah")
+    assert recurring.detect(conn, TODAY) == []
+
+
+def test_with_clause_description_not_recurring(conn):
+    # Offline-parsed social spend keeps "with" in the description; still social.
+    for d in [dt.date(2026, 4, 2), dt.date(2026, 5, 2), dt.date(2026, 6, 1)]:
+        db.add_transaction(conn, effective_date=d, amount_agorot=-1200,
+                           direction="expense", merchant=None,
+                           description="coffee with sarah")
+    assert recurring.detect(conn, TODAY) == []
+
+
+def test_dismiss_caps_key_length(conn):
+    recurring.dismiss(conn, "x" * 500)
+    stored = json.loads(db.get_setting(conn, "recurring_dismissed"))
+    assert stored and all(len(k) <= 120 for k in stored)
+
+
+def test_dismiss_bounds_the_list(conn):
+    for i in range(600):
+        recurring.dismiss(conn, f"sub-{i:04d}")
+    stored = json.loads(db.get_setting(conn, "recurring_dismissed"))
+    assert len(stored) <= 500
 
 
 def test_two_occurrences_not_recurring(conn):

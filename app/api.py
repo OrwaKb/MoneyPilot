@@ -161,7 +161,9 @@ class Api:
     @_safe
     def get_overview(self):
         today = self._today()
-        fp = insights.fact_pack(self.conn, today)
+        # get_overview never returns fp["recurring"] (the Overview card fetches
+        # it via get_recurring), so skip that detect() pass here.
+        fp = insights.fact_pack(self.conn, today, include_recurring=False)
         cycle_start = dt.date.fromisoformat(fp["cycle"]["start"])
         return {"safe_to_spend": fp["safe_to_spend"],
                 "categories": fp["categories"], "card": fp["card"],

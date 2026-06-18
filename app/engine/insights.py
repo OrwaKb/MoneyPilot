@@ -12,7 +12,7 @@ def _iso_dict(d: dict) -> dict:
             for k, v in d.items()}
 
 
-def fact_pack(conn, today: dt.date) -> dict:
+def fact_pack(conn, today: dt.date, *, include_recurring: bool = True) -> dict:
     salary_day = int(db.get_setting(conn, "salary_day", "1"))
     cyc = cycles.salary_cycle(today, salary_day)
     sts = budget.safe_to_spend(conn, today)
@@ -28,9 +28,7 @@ def fact_pack(conn, today: dt.date) -> dict:
     prev = cycles.salary_cycle(cyc["start"] - dt.timedelta(days=1), salary_day)
     prev_income, prev_expenses = budget.cycle_net(conn, prev["start"], prev["end"])
 
-    rec = recurring.summary(conn, today)
-
-    return {
+    fp = {
         "user_name": db.get_setting(conn, "user_name", ""),
         "today": today.isoformat(),
         "weekday": today.strftime("%A"),
@@ -66,7 +64,21 @@ def fact_pack(conn, today: dt.date) -> dict:
                     "total_agorot": available + earmarked,
                     "total_fmt": fmt_ils(available + earmarked)},
         "goals": [_iso_dict(g) for g in report],
-        "recurring": {
+        "monthly_savings_pace_agorot": goals.monthly_savings_pace(conn, today),
+        "total_pace_needed_agorot": total_pace_needed,
+        "last_cycle": {"income_agorot": prev_income,
+                       "expenses_agorot": prev_expenses},
+        "recent_transactions": [
+            {"date": r["effective_date"], "amount_fmt": fmt_ils(r["amount_agorot"]),
+             "category": r["category_name"], "description": r["description"],
+             "direction": r["direction"]}
+            for r in db.list_transactions(conn, limit=20)],
+    }
+    # Only the briefing/advisor consume this; skip the detect() pass for callers
+    # (get_overview) that don't, so a refresh doesn't run detection twice.
+    if include_recurring:
+        rec = recurring.summary(conn, today)
+        fp["recurring"] = {
             "monthly_total_agorot": rec["monthly_total_agorot"],
             "monthly_total_fmt": fmt_ils(rec["monthly_total_agorot"]),
             "count": len(rec["items"]),
@@ -79,14 +91,5 @@ def fact_pack(conn, today: dt.date) -> dict:
                           "typical_fmt": fmt_ils(i["typical_agorot"]),
                           "next_expected": i["next_expected"]}
                          for i in rec["upcoming"]],
-        },
-        "monthly_savings_pace_agorot": goals.monthly_savings_pace(conn, today),
-        "total_pace_needed_agorot": total_pace_needed,
-        "last_cycle": {"income_agorot": prev_income,
-                       "expenses_agorot": prev_expenses},
-        "recent_transactions": [
-            {"date": r["effective_date"], "amount_fmt": fmt_ils(r["amount_agorot"]),
-             "category": r["category_name"], "description": r["description"],
-             "direction": r["direction"]}
-            for r in db.list_transactions(conn, limit=20)],
-    }
+        }
+    return fp

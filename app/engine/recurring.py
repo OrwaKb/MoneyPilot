@@ -24,9 +24,7 @@ _CADENCE = {                 # name: (min_gap, max_gap, regularity_tol) in days
 
 
 def _norm(text) -> str:
-    s = (text or "").strip().lower()
-    s = s.split(" with ")[0]          # drop a trailing "with <people>" clause
-    return " ".join(s.split())
+    return " ".join((text or "").strip().lower().split())
 
 
 def _dismissed(conn) -> set[str]:
@@ -38,10 +36,11 @@ def _dismissed(conn) -> set[str]:
 
 
 def dismiss(conn, key: str) -> None:
-    k = _norm(key)
+    k = _norm(key)[:120]                          # bound a single key
     if not k:
         raise ValueError("nothing to dismiss")
-    db.set_setting(conn, _DISMISS_KEY, json.dumps(sorted(_dismissed(conn) | {k})))
+    keys = sorted(_dismissed(conn) | {k})[:500]   # bound the stored blob
+    db.set_setting(conn, _DISMISS_KEY, json.dumps(keys))
 
 
 def undismiss(conn, key: str) -> None:
@@ -71,7 +70,7 @@ def detect(conn, today: dt.date, *, lookback_days: int = 760,
     # monthly history); the staleness guard below drops series that stopped.
     since = (today - dt.timedelta(days=lookback_days)).isoformat()
     rows = conn.execute(
-        "SELECT effective_date, amount_agorot, merchant, description"
+        "SELECT effective_date, amount_agorot, merchant, description, people"
         " FROM transactions WHERE deleted_at IS NULL AND direction='expense'"
         " AND effective_date >= ? AND effective_date <= ?"
         " ORDER BY effective_date",
@@ -79,7 +78,12 @@ def detect(conn, today: dt.date, *, lookback_days: int = 760,
 
     groups: dict[str, list] = {}
     for r in rows:
-        key = _norm(r["merchant"] or r["description"])
+        base = r["merchant"] or r["description"] or ""
+        # social spend (a tagged person, or "... with <someone>") is not a
+        # subscription — keep the radar strict and skip it entirely.
+        if r["people"] or " with " in base.lower():
+            continue
+        key = _norm(base)
         if key:
             groups.setdefault(key, []).append(r)
 
@@ -112,7 +116,10 @@ def detect(conn, today: dt.date, *, lookback_days: int = 760,
         confidence = _confidence(len(occ), gaps, median_gap, amounts, typical)
         if confidence < _CONFIDENCE_FLOOR:
             continue
-        next_expected = dates[-1] + dt.timedelta(days=round(median_gap))
+        step = dt.timedelta(days=round(median_gap))
+        next_expected = dates[-1] + step
+        while next_expected < today:        # overdue-but-kept: project forward
+            next_expected += step
         monthly_equiv = typical if cadence == "monthly" else round(typical / 12)
         name = str(occ[-1]["merchant"] or occ[-1]["description"] or key).strip().title()
         out.append({
